@@ -1,0 +1,83 @@
+name: Build VoidEdit APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Generate Gradle Wrapper
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
+          unzip -q gradle.zip -d /opt/gradle
+          export PATH="/opt/gradle/gradle-8.7/bin:$PATH"
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoidEdit-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Keystore secret belum diset, skip release build."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
+          export KEYSTORE_PATH="$(pwd)/keystore.jks"
+          ./gradlew assembleRelease --no-daemon
+          rm -f keystore.jks
+
+      - name: Upload Release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoidEdit-release
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Tidak ada release APK, skip."
+            exit 0
+          fi
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/release/app-release.apk \
+            --title "VoidEdit $TAG" \
+            --notes "Download APK di bawah." \
+            --latest

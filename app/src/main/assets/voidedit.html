@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#8b5cf6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>VoidEdit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-base: #0d0d0d;
+    --bg-surface: #141414;
+    --bg-editor: #1a1a1a;
+    --bg-elevated: #27272a;
+    --bg-hover: #3f3f46;
+    --bg-active-line: #252525;
+    --border: #3f3f46;
+    --border-subtle: #27272a;
+    --accent: #8b5cf6;
+    --accent-hover: #a78bfa;
+    --accent-dim: rgba(139, 92, 246, 0.15);
+    --accent-glow: rgba(139, 92, 246, 0.3);
+    --teal: #14b8a6;
+    --teal-hover: #2dd4bf;
+    --teal-dim: rgba(20, 184, 166, 0.15);
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --text-line-num: #52525b;
+    --highlight-bg: rgba(16, 185, 129, 0.25);
+    --highlight-current: rgba(245, 158, 11, 0.4);
+    --success: #10b981;
+    --warn: #f59e0b;
+    --err: #ef4444;
+    --syn-keyword: #a855f7;
+    --syn-string: #4ade80;
+    --syn-comment: #6b7280;
+    --syn-number: #fb923c;
+    --syn-builtin: #60a5fa;
+    --editor-font-size: 14px;
+    --editor-line-height: 22px;
+    --editor-padding-top: 16px;
+    --editor-padding-left: 12px;
+    --toolbar-h: 56px;
+    --statusbar-h: 32px;
+    --gutter-w: 48px;
+    --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    color-scheme: dark;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Inter', 'Nunito', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-width: 100%;
+    margin: 0 auto;
+    background: var(--bg-base);
+    position: relative;
+    box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  }
+  @media (min-width: 600px) {
+    #app {
+      max-width: 800px;
+      border-left: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--border-subtle);
+    }
+  }
+
+  /* ── TOOLBAR ── */
+  #toolbar {
+    height: var(--toolbar-h);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+
+  #file-name-input {
+    flex: 1;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    outline: none;
+    min-width: 0;
+    transition: var(--transition);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+  }
+  #file-name-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim), inset 0 2px 4px rgba(0,0,0,0.05);
+  }
+
+  .tb-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    transition: var(--transition);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .tb-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  }
+  .tb-btn:active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+    transform: translateY(0);
+    box-shadow: none;
+  }
+  .tb-btn svg { width: 16px; height: 16px; stroke-width: 2.2px; }
+
+  #btn-search { color: var(--teal); border-color: var(--border-subtle); background: var(--teal-dim); }
+  #btn-search:hover { background: var(--bg-hover); border-color: var(--teal); color: var(--teal-hover); }
+  
+
+
+  #btn-save { color: var(--teal); border-color: var(--border-subtle); background: var(--teal-dim); }
+  #btn-save:hover { background: var(--bg-hover); border-color: var(--teal); color: var(--teal-hover); }
+
+  /* ── TOOLBAR EXTRAS (word wrap, font size) ── */
+  .tb-toggle {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    transition: var(--transition);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .tb-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  }
+  .tb-toggle.active {
+    background: var(--teal-dim);
+    color: var(--teal);
+    border-color: var(--teal);
+  }
+  .tb-toggle svg { width: 16px; height: 16px; stroke-width: 2.2px; }
+
+  #font-size-select {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    padding-right: 22px;
+  }
+  #font-size-select:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--teal);
+  }
+  #font-size-select:focus {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-dim);
+  }
+
+  /* ── EDITOR WRAP ── */
+  #editor-wrap {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-editor);
+  }
+
+  /* ── GUTTER (nomor baris) ── */
+  #gutter {
+    width: var(--gutter-w);
+    flex-shrink: 0;
+    background: var(--bg-editor);
+    border-right: 1px solid var(--border-subtle);
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+    z-index: 5;
+  }
+
+  #line-numbers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding-top: var(--editor-padding-top);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
+    color: var(--text-line-num);
+    text-align: right;
+    padding-right: 12px;
+  }
+
+  .line-num { display: block; height: var(--editor-line-height); transition: color 0.2s; }
+  .line-num.active { color: var(--text-secondary); font-weight: 700; }
+
+  /* ── CODE AREA ── */
+  #code-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #scroll-container {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #scroll-inner {
+    position: relative;
+    min-width: 100%;
+    min-height: 100%;
+  }
+
+  #highlight-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    padding-top: var(--editor-padding-top);
+    padding-left: var(--editor-padding-left);
+    padding-right: 16px;
+    padding-bottom: 80px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
+    color: transparent;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .hl-match {
+    background: rgba(139, 92, 246, 0.25);
+    border-radius: 3px;
+    color: transparent;
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.5);
+  }
+  .hl-match.current {
+    background: rgba(245, 158, 11, 0.3);
+    outline: 1px solid var(--warn);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+    border-radius: 3px;
+  }
+
+  .hl-replaced {
+    background: rgba(239, 68, 68, 0.25);
+    outline: 1px solid var(--err);
+    border-radius: 3px;
+    color: transparent;
+  }
+
+  /* ── SYNTAX HIGHLIGHT LAYER ── */
+  #syntax-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    padding-top: var(--editor-padding-top);
+    padding-left: var(--editor-padding-left);
+    padding-right: 16px;
+    padding-bottom: 80px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
+    color: var(--text-primary);
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+  }
+
+  .syn-keyword { color: var(--syn-keyword); }
+  .syn-string { color: var(--syn-string); }
+  .syn-comment { color: var(--syn-comment); font-style: italic; }
+  .syn-number { color: var(--syn-number); }
+  .syn-builtin { color: var(--syn-builtin); }
+
+  /* ── ACTIVE LINE HIGHLIGHT ── */
+  #active-line-highlight {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--editor-line-height);
+    background: var(--bg-active-line);
+    pointer-events: none;
+    z-index: 0;
+    transition: top 0.05s ease;
+    border-left: 2px solid var(--teal);
+  }
+
+  #editor-textarea {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    padding-top: var(--editor-padding-top);
+    padding-left: var(--editor-padding-left);
+    padding-right: 16px;
+    padding-bottom: 80px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
+    color: transparent;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    caret-color: var(--teal);
+    z-index: 2;
+    overflow: hidden;
+  }
+
+  /* ── STATUSBAR ── */
+  #statusbar {
+    height: var(--statusbar-h);
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 12px;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-secondary);
+    overflow: hidden;
+    position: relative;
+    z-index: 10;
+  }
+
+  #sb-info { display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; overflow: hidden; }
+  .sb-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .sb-label { color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+  .sb-val { color: var(--text-primary); font-weight: 600; }
+  .sb-sep { color: var(--border-subtle); }
+
+  #sb-undo-redo { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+  .sb-ud-btn {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    width: 24px; height: 24px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: var(--transition);
+  }
+  .sb-ud-btn:hover:not(:disabled) { background: var(--bg-elevated); color: var(--text-primary); }
+  .sb-ud-btn:active:not(:disabled) { background: var(--accent-dim); color: var(--accent); }
+  .sb-ud-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  #sb-match { color: var(--accent); font-weight: 700; background: var(--accent-dim); padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+  #sb-nav { display: none; align-items: center; gap: 4px; flex-shrink: 0; }
+  #sb-nav.visible { display: flex; }
+  .sb-nav-btn {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    width: 24px; height: 24px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: var(--transition);
+  }
+  .sb-nav-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+  .sb-nav-btn:active { background: var(--accent-dim); color: var(--accent); }
+  
+  #sb-clear-btn {
+    background: none; border: none;
+    color: var(--err); font-size: 14px;
+    cursor: pointer; padding: 0 4px;
+    margin-left: 4px;
+    flex-shrink: 0;
+    transition: var(--transition);
+    opacity: 0.7;
+  }
+  #sb-clear-btn:hover { opacity: 1; transform: scale(1.1); }
+
+  /* ── POPUP DIALOG ── */
+  #popup-dialog {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  #popup-dialog::backdrop {
+    background: rgba(0,0,0,0.6);
+  }
+  #popup-dialog[open] {
+    display: flex;
+    animation: fadeIn 0.2s ease forwards;
+  }
+  #popup-dialog[open]::backdrop {
+    animation: fadeIn 0.2s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  #popup-box {
+    background: var(--bg-surface);
+    border-top: 1px solid rgba(255,255,255,0.05);
+    border-radius: 24px 24px 0 0;
+    width: 100%;
+    max-width: 600px;
+    height: 90dvh;
+    padding: 12px 24px 24px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 -10px 50px rgba(0,0,0,0.6);
+    animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  #popup-drag-handle {
+    width: 48px;
+    height: 5px;
+    background: var(--border);
+    border-radius: 5px;
+    margin: 0 auto 24px;
+    flex-shrink: 0;
+  }
+
+  #popup-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #popup-title svg { width: 18px; height: 18px; color: var(--accent); }
+
+  #popup-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-secondary);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    flex-shrink: 0;
+  }
+  #popup-close:hover { background: var(--bg-hover); color: var(--text-primary); transform: rotate(90deg); }
+  #popup-close:active { background: rgba(239, 68, 68, 0.2); color: var(--err); border-color: var(--err); }
+
+  #popup-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 4px;
+  }
+  #popup-scroll::-webkit-scrollbar { width: 6px; }
+  #popup-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
+  .popup-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; flex-shrink: 0; }
+  .popup-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: .05em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .popup-input {
+    width: 100%;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 20px;
+    padding: 14px 16px;
+    outline: none;
+    resize: none;
+    transition: var(--transition);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+  }
+  #search-input  { min-height: 80px; }
+  #replace-input { min-height: 80px; }
+  .popup-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim), inset 0 2px 4px rgba(0,0,0,0.2); }
+
+  #search-hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-height: 20px;
+    margin-bottom: 16px;
+    font-family: 'Inter', sans-serif;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #search-hint.warn { color: var(--warn); }
+  #search-hint.ok { color: var(--success); }
+
+  .popup-btns {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+    padding-top: 8px;
+    margin-bottom: 24px;
+  }
+  .popup-btn {
+    flex: 1;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 14px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: center;
+    transition: var(--transition);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .popup-btn:hover { background: var(--bg-hover); transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.2); border-color: var(--border-subtle); }
+  .popup-btn:active { transform: translateY(0); box-shadow: none; }
+  
+  .popup-btn.primary { 
+    background: var(--accent); 
+    color: #fff; 
+    border-color: var(--accent); 
+    box-shadow: 0 4px 12px var(--accent-dim);
+  }
+  .popup-btn.primary:hover { background: var(--accent-hover); box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4); border-color: var(--accent-hover); }
+
+  /* nav arrows */
+  #nav-row { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; flex-shrink: 0; }
+  #nav-counter { 
+    font-size: 13px; 
+    color: var(--text-primary); 
+    font-family: 'JetBrains Mono', monospace; 
+    margin-left: auto;
+    background: var(--bg-elevated);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+  }
+
+  .nav-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-secondary);
+    font-size: 16px;
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+  }
+  .nav-btn:hover { background: var(--bg-hover); color: var(--text-primary); transform: translateY(-1px); }
+  .nav-btn:active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); transform: translateY(0); }
+
+
+
+  /* scrollbar style */
+  #scroll-container {
+    scrollbar-color: var(--border) transparent;
+    scrollbar-width: thin;
+  }
+  @supports not (scrollbar-color: auto) {
+    #scroll-container::-webkit-scrollbar { width: 10px; height: 10px; }
+    #scroll-container::-webkit-scrollbar-track { background: transparent; }
+    #scroll-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 3px solid var(--bg-editor); }
+    #scroll-container::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  }
+
+  /* ── WORD WRAP MODE ── */
+  #editor-textarea.word-wrap {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  #syntax-layer.word-wrap {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+  #highlight-layer.word-wrap {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  /* ── CONFIRM DIALOG ── */
+  #confirm-dialog {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: auto;
+    max-width: 90%;
+    width: 380px;
+    overflow: visible;
+  }
+  #confirm-dialog::backdrop {
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  #confirm-dialog[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: confirmPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  #confirm-dialog[open]::backdrop {
+    animation: fadeIn 0.2s ease forwards;
+  }
+
+  @keyframes confirmPopIn {
+    from { opacity: 0; transform: scale(0.85) translateY(12px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  #confirm-box {
+    background: linear-gradient(145deg, var(--bg-surface) 0%, #1c1c20 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 24px;
+    padding: 32px 28px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 
+      0 24px 80px rgba(0,0,0,0.6), 
+      0 0 0 1px rgba(255,255,255,0.05),
+      inset 0 1px 0 rgba(255,255,255,0.06);
+    width: 100%;
+  }
+
+  #confirm-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-dim) 0%, rgba(139, 92, 246, 0.25) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 0 24px var(--accent-dim);
+    animation: iconPulse 2s ease-in-out infinite;
+  }
+  @keyframes iconPulse {
+    0%, 100% { box-shadow: 0 0 24px var(--accent-dim); }
+    50% { box-shadow: 0 0 36px var(--accent-glow); }
+  }
+  #confirm-icon svg {
+    width: 28px;
+    height: 28px;
+    color: var(--accent-hover);
+    stroke-width: 2;
+  }
+
+  #confirm-message {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    line-height: 1.6;
+    font-family: 'Inter', 'Nunito', sans-serif;
+    max-width: 280px;
+  }
+
+  #confirm-btns {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .confirm-btn {
+    flex: 1;
+    padding: 14px 16px;
+    border-radius: 14px;
+    font-family: 'Inter', 'Nunito', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+    border: 1px solid var(--border);
+    text-align: center;
+    letter-spacing: 0.02em;
+  }
+  .confirm-btn.cancel {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+  }
+  .confirm-btn.cancel:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+  }
+  .confirm-btn.cancel:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+  .confirm-btn.primary {
+    background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 4px 16px var(--accent-dim);
+  }
+  .confirm-btn.primary:hover {
+    background: linear-gradient(135deg, var(--accent-hover) 0%, #8b5cf6 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(139, 92, 246, 0.5);
+  }
+  .confirm-btn.primary:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px var(--accent-dim);
+  }
+  .confirm-btn.discard {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--err);
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+  .confirm-btn.discard:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3);
+    border-color: var(--err);
+  }
+  .confirm-btn.discard:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+  #confirm-btns.three-buttons {
+    flex-direction: column;
+    gap: 10px;
+  }
+  #confirm-btns.three-buttons .confirm-btn {
+    flex: none;
+    width: 100%;
+  }
+  #confirm-btns.three-buttons .confirm-btn.primary { order: -1; }
+  #confirm-btns.three-buttons .confirm-btn.discard { order: 0; }
+  #confirm-btns.three-buttons .confirm-btn.cancel { order: 1; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- TOOLBAR -->
+  <div id="toolbar">
+    <input id="file-name-input" type="text" value="untitled.js" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <button class="tb-btn" id="btn-search" onclick="openPopup()" aria-label="Cari & Ganti" title="Cari & Ganti">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+    </button>
+
+    <button class="tb-btn" id="btn-save" onclick="saveFile()" aria-label="Simpan File" title="Simpan File">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+    </button>
+    <button class="tb-toggle" id="btn-wordwrap" onclick="toggleWordWrap()" title="Word Wrap" aria-label="Toggle Word Wrap" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h15a3 3 0 110 6h-4"/><polyline points="16 16 14 18 16 20"/><path d="M3 18h7"/></svg>
+      <span id="wrap-label">Wrap</span>
+    </button>
+    <select id="font-size-select" onchange="changeFontSize(this.value)" title="Font Size" aria-label="Ukuran Font">
+      <option value="10">10px</option>
+      <option value="12">12px</option>
+      <option value="14" selected>14px</option>
+      <option value="16">16px</option>
+      <option value="18">18px</option>
+      <option value="20">20px</option>
+      <option value="24">24px</option>
+    </select>
+  </div>
+
+  <!-- EDITOR -->
+  <div id="editor-wrap">
+
+    <!-- Gutter -->
+    <div id="gutter">
+      <div id="line-numbers"></div>
+    </div>
+
+    <!-- Code area -->
+    <div id="code-area">
+      <div id="scroll-container">
+        <div id="scroll-inner">
+          <div id="active-line-highlight"></div>
+          <div id="syntax-layer" aria-hidden="true"></div>
+          <div id="highlight-layer" aria-hidden="true"></div>
+          <textarea id="editor-textarea"
+            spellcheck="false"
+            autocorrect="off"
+            autocapitalize="off"
+            autocomplete="off"
+          ></textarea>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- STATUSBAR -->
+  <div id="statusbar">
+    <div id="sb-info">
+      <div class="sb-item"><span class="sb-label">Ln</span><span class="sb-val" id="sb-ln">1</span></div>
+      <div class="sb-sep">·</div>
+      <div class="sb-item"><span class="sb-label">Col</span><span class="sb-val" id="sb-col">1</span></div>
+      <div class="sb-sep">·</div>
+      <div class="sb-item"><span class="sb-label">Chr</span><span class="sb-val" id="sb-char">0</span></div>
+    </div>
+    <div id="sb-undo-redo">
+      <button class="sb-ud-btn" id="btn-undo" onclick="doUndo()" title="Undo">↩</button>
+      <button class="sb-ud-btn" id="btn-redo" onclick="doRedo()" title="Redo">↪</button>
+    </div>
+    <div id="sb-nav">
+      <button class="sb-nav-btn" onclick="navMatch(-1)">◀</button>
+      <span id="sb-match"></span>
+      <button class="sb-nav-btn" onclick="navMatch(1)">▶</button>
+      <button id="sb-clear-btn" onclick="clearSearch()">✕</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- POPUP SEARCH/REPLACE -->
+<dialog id="popup-dialog" closedby="any" aria-labelledby="popup-title">
+  <div id="popup-box">
+    <div id="popup-drag-handle"></div>
+    <div id="popup-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>Cari &amp; Ganti</div>
+    <button id="popup-close" onclick="closePopup()" aria-label="Tutup" type="button">✕</button>
+
+    <div id="popup-scroll">
+      <div class="popup-row">
+        <label class="popup-label" for="search-input"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>Cari</label>
+        <textarea id="search-input" class="popup-input" rows="5" placeholder="Ketik lalu tekan Enter…"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      </div>
+
+      <div id="search-hint">Tekan Enter untuk mencari</div>
+
+      <div id="nav-row">
+        <button class="nav-btn" onclick="navMatch(-1)" title="Sebelumnya" aria-label="Match sebelumnya" type="button">◀</button>
+        <button class="nav-btn" onclick="navMatch(1)" title="Berikutnya" aria-label="Match berikutnya" type="button">▶</button>
+        <span id="nav-counter" aria-live="polite">—</span>
+      </div>
+
+      <div class="popup-row">
+        <label class="popup-label" for="replace-input"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Ganti</label>
+        <textarea id="replace-input" class="popup-input" rows="4" placeholder="Teks pengganti…"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      </div>
+
+      <div class="popup-btns">
+        <button class="popup-btn primary" onclick="doSearch()" type="button">Cari</button>
+        <button class="popup-btn" onclick="replaceCurrent()" type="button">Ganti</button>
+        <button class="popup-btn" onclick="replaceAll()" type="button">Ganti Semua</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+
+
+<!-- CONFIRM DIALOG -->
+<dialog id="confirm-dialog" closedby="closerequest" aria-labelledby="confirm-message">
+  <div id="confirm-box">
+    <div id="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+        <polyline points="17 21 17 13 7 13 7 21"/>
+        <polyline points="7 3 7 8 15 8"/>
+      </svg>
+    </div>
+    <div id="confirm-message">Apakah anda akan menyimpan perubahan?</div>
+    <div id="confirm-btns">
+      <button class="confirm-btn cancel" id="confirm-cancel" type="button">Batal</button>
+      <button class="confirm-btn discard" id="confirm-discard" type="button" style="display:none;">Keluar Tanpa Simpan</button>
+      <button class="confirm-btn primary" id="confirm-ok" type="button">Simpan</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+// ── ELEMENTS ──
+const textarea    = document.getElementById('editor-textarea');
+const hlLayer     = document.getElementById('highlight-layer');
+const syntaxLayer = document.getElementById('syntax-layer');
+const activeLineHL = document.getElementById('active-line-highlight');
+const lineNums    = document.getElementById('line-numbers');
+const scrollCont  = document.getElementById('scroll-container');
+const scrollInner = document.getElementById('scroll-inner');
+const sbLn        = document.getElementById('sb-ln');
+const sbCol       = document.getElementById('sb-col');
+const sbChar      = document.getElementById('sb-char');
+const sbMatch     = document.getElementById('sb-match');
+const sbNav       = document.getElementById('sb-nav');
+const popupDialog = document.getElementById('popup-dialog');
+const searchInput = document.getElementById('search-input');
+const replaceInp  = document.getElementById('replace-input');
+const searchHint  = document.getElementById('search-hint');
+const navCounter  = document.getElementById('nav-counter');
+
+const fileNameInp = document.getElementById('file-name-input');
+const btnUndo     = document.getElementById('btn-undo');
+const btnRedo     = document.getElementById('btn-redo');
+const btnWordWrap = document.getElementById('btn-wordwrap');
+const fontSizeSelect = document.getElementById('font-size-select');
+const wrapLabel   = document.getElementById('wrap-label');
+
+// ── STATE ──
+let matches = [];
+let currentMatchIdx = -1;
+let replacedRanges = []; // { pos, len } — highlight merah setelah replace
+let activeQuery = ''; // query aktif untuk highlight, terpisah dari popup state
+let wordWrapOn = false;
+let isDirty = false;
+let lastSavedContent = '';
+
+// ── SYNTAX HIGHLIGHTING ──
+function renderSyntaxHighlight(code) {
+  // Tokenize with regex-based approach for JS syntax
+  const tokens = [];
+  const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\b(?:function|const|let|var|return|if|else|for|while|class|import|export|default|new|this|typeof|instanceof|switch|case|break|continue|throw|try|catch|finally|async|await|yield|do|in|of|void|delete|debugger|extends|super|static|get|set|from|as|with|enum|implements|interface|package|private|protected|public)\b)|(\b(?:console|Math|JSON|Object|Array|String|Number|Boolean|Date|RegExp|Map|Set|WeakMap|WeakSet|Promise|Symbol|Error|TypeError|RangeError|SyntaxError|parseInt|parseFloat|isNaN|isFinite|undefined|null|true|false|NaN|Infinity|globalThis|window|document|navigator|fetch|setTimeout|setInterval|clearTimeout|clearInterval|requestAnimationFrame|cancelAnimationFrame|alert|confirm|prompt)\b)|(\b(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)\b)/g;
+  
+  let match;
+  while ((match = re.exec(code)) !== null) {
+    let cls = '';
+    if (match[1]) cls = 'syn-comment';
+    else if (match[2]) cls = 'syn-string';
+    else if (match[3]) cls = 'syn-keyword';
+    else if (match[4]) cls = 'syn-builtin';
+    else if (match[5]) cls = 'syn-number';
+    if (cls) {
+      tokens.push({ pos: match.index, end: match.index + match[0].length, cls });
+    }
+  }
+
+  // Build highlighted HTML
+  let result = '';
+  let cursor = 0;
+  for (const tk of tokens) {
+    if (tk.pos < cursor) continue;
+    result += escHtml(code.slice(cursor, tk.pos));
+    result += `<span class="${tk.cls}">${escHtml(code.slice(tk.pos, tk.end))}</span>`;
+    cursor = tk.end;
+  }
+  result += escHtml(code.slice(cursor));
+  syntaxLayer.innerHTML = result;
+}
+
+// ── ACTIVE LINE HIGHLIGHT ──
+function updateActiveLine(lineNum) {
+  const lineH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--editor-line-height'));
+  const padTop = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--editor-padding-top'));
+  activeLineHL.style.top = (padTop + (lineNum - 1) * lineH) + 'px';
+  activeLineHL.style.height = lineH + 'px';
+}
+
+// ── WORD WRAP TOGGLE ──
+function toggleWordWrap() {
+  wordWrapOn = !wordWrapOn;
+  textarea.classList.toggle('word-wrap', wordWrapOn);
+  syntaxLayer.classList.toggle('word-wrap', wordWrapOn);
+  hlLayer.classList.toggle('word-wrap', wordWrapOn);
+  btnWordWrap.classList.toggle('active', wordWrapOn);
+  wrapLabel.textContent = wordWrapOn ? 'Wrap' : 'Wrap';
+  localStorage.setItem('voidedit-wordwrap', wordWrapOn ? '1' : '0');
+  
+  // Sembunyikan gutter (nomor baris) saat word wrap aktif
+  // karena text yang melipat (wrap) akan merusak sinkronisasi tinggi nomor baris.
+  const gutter = document.getElementById('gutter');
+  if (wordWrapOn) {
+    gutter.style.display = 'none';
+  } else {
+    gutter.style.display = 'block';
+  }
+
+  resizeTextarea();
+  fullUpdate();
+}
+
+// ── FONT SIZE CONTROL ──
+function changeFontSize(size) {
+  const px = parseInt(size);
+  if (isNaN(px)) return;
+  const lineH = Math.round(px * 1.6);
+  document.documentElement.style.setProperty('--editor-font-size', px + 'px');
+  document.documentElement.style.setProperty('--editor-line-height', lineH + 'px');
+  fontSizeSelect.value = px;
+  localStorage.setItem('voidedit-fontsize', px);
+  resizeTextarea();
+  fullUpdate();
+}
+
+// ── INIT WORD WRAP & FONT SIZE FROM LOCALSTORAGE ──
+function initSettings() {
+  // Font size
+  const savedSize = localStorage.getItem('voidedit-fontsize');
+  if (savedSize) {
+    changeFontSize(savedSize);
+  }
+  // Word wrap
+  const savedWrap = localStorage.getItem('voidedit-wordwrap');
+  if (savedWrap === '1') {
+    wordWrapOn = false; // toggleWordWrap will flip it
+    toggleWordWrap();
+  }
+}
+
+// ── UNDO/REDO ──
+const MAX_HISTORY = 200;
+let undoStack = [];
+let redoStack = [];
+let isUndoRedo = false;
+
+function pushHistory(val) {
+  if (isUndoRedo) return;
+  const pos = textarea.selectionStart;
+  if (undoStack.length && undoStack[undoStack.length - 1].val === val) return;
+  undoStack.push({ val, pos });
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack = [];
+  updateUndoRedoBtns();
+}
+
+function restoreSnapshot(snap) {
+  isUndoRedo = true;
+  textarea.value = snap.val;
+  textarea.selectionStart = textarea.selectionEnd = snap.pos;
+  isUndoRedo = false;
+  fullUpdate();
+  updateUndoRedoBtns();
+}
+
+function doUndo() {
+  if (undoStack.length <= 1) return;
+  redoStack.push(undoStack.pop());
+  restoreSnapshot(undoStack[undoStack.length - 1]);
+}
+
+function doRedo() {
+  if (!redoStack.length) return;
+  const snap = redoStack.pop();
+  if (undoStack.length >= MAX_HISTORY) undoStack.shift();
+  undoStack.push(snap);
+  restoreSnapshot(snap);
+}
+
+function updateUndoRedoBtns() {
+  btnUndo.disabled = undoStack.length <= 1;
+  btnRedo.disabled = redoStack.length === 0;
+}
+
+// ── INITIAL CONTENT ──
+const INITIAL = `// VoidEdit — Mobile Code Editor
+// Ketik atau buka file untuk mulai.
+
+function greet(name) {
+  const msg = \`Halo, \${name}!\`;
+  console.log(msg);
+  return msg;
+}
+
+const result = greet("Dani");
+console.log(result);
+
+// Fitur:
+// ✓ Ghost Textarea
+// ✓ Nomor baris sinkron pixel-perfect
+// ✓ Search & Replace
+// ✓ Open / Save file
+`;
+
+textarea.value = INITIAL;
+undoStack.push({ val: INITIAL, pos: 0 });
+updateUndoRedoBtns();
+
+// ── SYNC SCROLL & SIZE ──
+
+function syncGutterScroll() {
+  lineNums.style.transform = `translateY(-${scrollCont.scrollTop}px)`;
+}
+
+scrollCont.addEventListener('scroll', () => {
+  syncGutterScroll();
+}, { passive: true });
+
+// ── TEXTAREA SIZING ──
+// Textarea harus mengisi scroll-inner
+function resizeTextarea() {
+  if (wordWrapOn) {
+    // Word wrap ON → width tetap 100%, biarkan teks turun ke bawah
+    const containerW = scrollCont.clientWidth;
+    scrollInner.style.width = containerW + 'px';
+    textarea.style.width = containerW + 'px';
+    syntaxLayer.style.width = containerW + 'px';
+    hlLayer.style.width = containerW + 'px';
+    
+    // Reset tinggi sementara agar bisa menyusut
+    textarea.style.height = '0px';
+    
+    // Hitung tinggi setelah wrap
+    const minH = textarea.scrollHeight;
+    scrollInner.style.height = Math.max(minH, scrollCont.clientHeight) + 'px';
+    textarea.style.height = scrollInner.style.height;
+    syntaxLayer.style.height = scrollInner.style.height;
+    hlLayer.style.height = scrollInner.style.height;
+  } else {
+    // Word wrap OFF → reset height saja agar scrollHeight akurat
+    textarea.style.height = '0px';
+    // Tetap 100% agar tidak ter-wrap paksa oleh bug browser mobile pada elemen 0px
+    textarea.style.width = '100%';
+    
+    const minH = textarea.scrollHeight;
+    const minW = textarea.scrollWidth;
+    
+    scrollInner.style.height = Math.max(minH, scrollCont.clientHeight) + 'px';
+    scrollInner.style.width  = Math.max(minW, scrollCont.clientWidth)  + 'px';
+    textarea.style.width  = scrollInner.style.width;
+    textarea.style.height = scrollInner.style.height;
+    syntaxLayer.style.width  = scrollInner.style.width;
+    syntaxLayer.style.height = scrollInner.style.height;
+    hlLayer.style.width  = scrollInner.style.width;
+    hlLayer.style.height = scrollInner.style.height;
+  }
+}
+
+// ── LINE NUMBERS ──
+function renderLineNumbers(count, activeLine) {
+  let html = '';
+  for (let i = 1; i <= count; i++) {
+    html += `<span class="line-num${i === activeLine ? ' active' : ''}">${i}</span>`;
+  }
+  lineNums.innerHTML = html;
+}
+
+// ── HIGHLIGHT LAYER ──
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderHighlight(query = '', curIdx = -1) {
+  const code = textarea.value;
+  const events = [];
+
+  // Search matches
+  if (query) {
+    const lq = query.toLowerCase();
+    const lc = code.toLowerCase();
+    let i = 0, mIdx = 0;
+    while (true) {
+      const pos = lc.indexOf(lq, i);
+      if (pos === -1) break;
+      events.push({ pos, end: pos + query.length, cls: 'hl-match' + (mIdx === curIdx ? ' current' : '') });
+      i = pos + query.length; mIdx++;
+    }
+  }
+
+  // Replaced ranges
+  for (const r of replacedRanges) {
+    if (r.len > 0) events.push({ pos: r.pos, end: r.pos + r.len, cls: 'hl-replaced' });
+  }
+
+  // Sort by position, remove overlaps (keep first event per range)
+  events.sort((a, b) => a.pos - b.pos);
+  const deduped = [];
+  let lastEnd = 0;
+  for (const ev of events) {
+    if (ev.pos < lastEnd) continue; // skip overlap
+    deduped.push(ev);
+    lastEnd = ev.end;
+  }
+
+  let result = '';
+  let cursor = 0;
+  for (const ev of deduped) {
+    if (ev.pos < cursor) continue;
+    result += escHtml(code.slice(cursor, ev.pos));
+    result += `<mark class="${ev.cls}">${escHtml(code.slice(ev.pos, ev.end))}</mark>`;
+    cursor = ev.end;
+  }
+  result += escHtml(code.slice(cursor));
+  hlLayer.innerHTML = result;
+}
+
+// ── FIND MATCHES ──
+function findMatches(query) {
+  matches = [];
+  if (!query) return;
+  const lq = query.toLowerCase();
+  const lc = textarea.value.toLowerCase();
+  let i = 0;
+  while (true) {
+    const pos = lc.indexOf(lq, i);
+    if (pos === -1) break;
+    matches.push(pos);
+    i = pos + lq.length;
+  }
+}
+
+
+// ── NAVIGATE TO MATCH ──
+function scrollToMatch(idx) {
+  if (!matches.length) return;
+  const pos = matches[idx];
+  const before = textarea.value.slice(0, pos);
+  const lineIdx = (before.match(/\n/g) || []).length;
+  const lineH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--editor-line-height'));
+  const padTop = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--editor-padding-top'));
+  const targetY = padTop + lineIdx * lineH - scrollCont.clientHeight / 2 + lineH;
+  scrollCont.scrollTop = Math.max(0, targetY);
+}
+
+// ── DEBOUNCE UTIL ──
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// ── FULL UPDATE ──
+let rafId = null;
+function fullUpdate() {
+  // Cancel rAF sebelumnya agar selalu pakai state terbaru
+  if (rafId !== null) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    const code = textarea.value;
+    const lines = code.split('\n');
+    const numLines = lines.length;
+
+    const selStart = textarea.selectionStart;
+    const before = code.slice(0, selStart);
+    const ln = (before.match(/\n/g) || []).length + 1;
+    const col = selStart - before.lastIndexOf('\n');
+
+    sbLn.textContent   = ln;
+    sbCol.textContent  = col;
+    sbChar.textContent = code.length;
+
+    renderLineNumbers(numLines, ln);
+
+    // Syntax highlighting
+    renderSyntaxHighlight(code);
+
+    // Active line highlight
+    updateActiveLine(ln);
+
+    // Highlight pakai activeQuery + currentMatchIdx terbaru
+    renderHighlight(activeQuery, currentMatchIdx);
+
+    resizeTextarea();
+    syncGutterScroll();
+  });
+}
+
+// ── TEXTAREA EVENTS ──
+let isProgrammaticChange = false;
+textarea.addEventListener('input', () => {
+  if (isProgrammaticChange) return;
+  replacedRanges = [];
+  isDirty = true;
+  pushHistory(textarea.value);
+  fullUpdate();
+});
+textarea.addEventListener('keyup', fullUpdate);
+textarea.addEventListener('click', fullUpdate);
+textarea.addEventListener('keydown', (e) => {
+  // Undo: Ctrl+Z
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault(); doUndo(); return;
+  }
+  // Redo: Ctrl+Y atau Ctrl+Shift+Z
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault(); doRedo(); return;
+  }
+  // Tab support
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const s = textarea.selectionStart;
+    const v = textarea.value;
+    textarea.value = v.slice(0, s) + '  ' + v.slice(textarea.selectionEnd);
+    textarea.selectionStart = textarea.selectionEnd = s + 2;
+    pushHistory(textarea.value);
+    fullUpdate();
+  }
+});
+
+// ── POPUP ──
+function openPopup() {
+  popupDialog.showModal();
+  searchInput.focus();
+}
+
+function closePopup() {
+  popupDialog.close();
+  // highlight & nav di statusbar tetap aktif jika ada matches
+}
+
+function clearSearch() {
+  matches = [];
+  currentMatchIdx = -1;
+  replacedRanges = [];
+  activeQuery = '';
+  renderHighlight('');
+  sbMatch.textContent = '';
+  sbNav.classList.remove('visible');
+  navCounter.textContent = '—';
+}
+
+// Tutup hanya jika klik backdrop
+// Fallback for browsers without closedby support
+if (!('closedBy' in HTMLDialogElement.prototype)) {
+  popupDialog.addEventListener('click', (event) => {
+    // 1. When clicking the backdrop, the event target is the dialog element itself.
+    // Ignore clicks where the target is a child element inside the dialog.
+    if (event.target !== popupDialog) return;
+
+    // 2. Check if the click coordinates fall within the dialog's content box.
+    const rect = popupDialog.getBoundingClientRect();
+    const isDialogContent = (
+      rect.top <= event.clientY &&
+      event.clientY <= rect.top + rect.height &&
+      rect.left <= event.clientX &&
+      event.clientX <= rect.left + rect.width
+    );
+
+    if (isDialogContent) return;
+
+    // 3. Since the click was outside the content area (on the backdrop), manually close the dialog.
+    popupDialog.close();
+  });
+}
+
+// ── SEARCH LOGIC ──
+// Saat mengetik → hanya reset jika query benar-benar berubah
+searchInput.addEventListener('input', () => {
+  const newQ = searchInput.value.trim();
+  // Tidak reset jika value sama dengan activeQuery (cegah false reset dari focus/composing)
+  if (newQ === activeQuery) return;
+  // Reset state pencarian
+  matches = [];
+  currentMatchIdx = -1;
+  activeQuery = '';
+  replacedRanges = [];
+  renderHighlight('');
+  sbMatch.textContent = '';
+  navCounter.textContent = '—';
+  searchHint.textContent = newQ.length > 0 ? 'Tekan Enter untuk mencari' : '';
+  searchHint.className = newQ.length > 0 ? 'warn' : '';
+});
+
+// Enter → eksekusi pencarian (Shift+Enter = newline biasa)
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    doSearch();
+  }
+});
+
+function doSearch() {
+  const q = searchInput.value.trim().split('\r\n').join('\n').split('\r').join('\n');
+  if (!q) {
+    searchHint.textContent = 'Masukkan kata yang ingin dicari.';
+    searchHint.className = 'warn';
+    return;
+  }
+  findMatches(q);
+  if (matches.length === 0) {
+    searchHint.textContent = 'Tidak ditemukan.';
+    searchHint.className = 'warn';
+    navCounter.textContent = '—';
+    sbMatch.textContent = '0';
+    renderHighlight(q, -1);
+    return;
+  }
+  currentMatchIdx = 0;
+  activeQuery = q;
+  searchHint.textContent = `${matches.length} match ditemukan.`;
+  searchHint.className = 'ok';
+  navCounter.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  // Tampilkan nav di statusbar
+  sbMatch.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  sbNav.classList.add('visible');
+  renderHighlight(q, currentMatchIdx);
+  scrollToMatch(currentMatchIdx);
+}
+
+function navMatch(dir) {
+  if (!matches.length) return;
+  currentMatchIdx = (currentMatchIdx + dir + matches.length) % matches.length;
+  navCounter.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  sbMatch.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  renderHighlight(activeQuery, currentMatchIdx);
+  scrollToMatch(currentMatchIdx);
+}
+
+function replaceCurrent() {
+  const q = searchInput.value.trim().split('\r\n').join('\n').split('\r').join('\n');
+  if (!q) return;
+
+  // Re-scan dulu dari teks terkini — hindari posisi stale
+  findMatches(q);
+  if (!matches.length) {
+    // Teks sudah tidak ada match — update UI supaya user tahu
+    activeQuery = '';
+    currentMatchIdx = -1;
+    replacedRanges = [];
+    searchHint.textContent = 'Tidak ditemukan. Ketik ulang atau ubah kata cari.';
+    searchHint.className = 'warn';
+    navCounter.textContent = '—';
+    sbMatch.textContent = '0';
+    renderHighlight('');
+    return;
+  }
+  if (currentMatchIdx === -1 || currentMatchIdx >= matches.length) currentMatchIdx = 0;
+
+  const r = replaceInp.value;
+  const pos = matches[currentMatchIdx];
+  const v = textarea.value;
+
+  // Lakukan replace (flag agar textarea input event tidak clear replacedRanges)
+  isProgrammaticChange = true;
+  textarea.value = v.slice(0, pos) + r + v.slice(pos + q.length);
+  textarea.selectionStart = textarea.selectionEnd = pos + r.length;
+  isProgrammaticChange = false;
+  pushHistory(textarea.value);
+
+  // Simpan replaced range
+  const pendingRange = r.length > 0 ? { pos, len: r.length } : null;
+
+  // Re-scan setelah replace
+  findMatches(q);
+
+  if (matches.length === 0) {
+    activeQuery = '';
+    currentMatchIdx = -1;
+    replacedRanges = pendingRange ? [pendingRange] : [];
+    // Otomatis isi CARI dengan teks hasil replace — siap cari lagi
+    searchInput.value = r;
+    searchHint.textContent = 'Diganti! Ubah kata cari atau tekan Cari lagi.';
+    searchHint.className = 'ok';
+    navCounter.textContent = '—';
+    sbMatch.textContent = '0 tersisa';
+    fullUpdate();
+    return;
+  }
+
+  const afterPos = pos + r.length;
+  let nextIdx = matches.findIndex(m => m >= afterPos);
+  if (nextIdx === -1) nextIdx = 0;
+  currentMatchIdx = nextIdx;
+  activeQuery = q;
+  replacedRanges = pendingRange ? [pendingRange] : [];
+
+  navCounter.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  sbMatch.textContent = `${currentMatchIdx + 1}/${matches.length}`;
+  sbNav.classList.add('visible');
+  searchHint.textContent = `${matches.length} match tersisa.`;
+  searchHint.className = 'ok';
+
+  // fullUpdate handles resize + renderHighlight sekaligus
+  fullUpdate();
+  scrollToMatch(currentMatchIdx);
+}
+
+function replaceAll() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+  const r = replaceInp.value;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(escaped, 'gi');
+  const count = (textarea.value.match(regex) || []).length;
+  if (!count) return;
+
+  // Hitung posisi hasil replace di string baru (akumulasi shift per match)
+  const newRanges = [];
+  if (r.length > 0) {
+    let src = textarea.value;
+    let offset = 0;
+    const re2 = new RegExp(escaped, 'gi');
+    let m;
+    while ((m = re2.exec(src)) !== null) {
+      const newPos = m.index + offset;
+      newRanges.push({ pos: newPos, len: r.length });
+      offset += (r.length - q.length); // akumulasi shift setelah setiap replace
+    }
+  }
+
+  isProgrammaticChange = true;
+  textarea.value = textarea.value.replace(regex, r);
+  isProgrammaticChange = false;
+  pushHistory(textarea.value);
+  // clearSearch dulu, lalu set replacedRanges (urutan penting!)
+  clearSearch();
+  replacedRanges = newRanges;
+  activeQuery = q;
+  closePopup();
+  fullUpdate();
+  sbMatch.textContent = `${count} diganti`;
+  sbNav.classList.add('visible');
+  setTimeout(() => { if (!matches.length) { sbNav.classList.remove('visible'); } }, 2000);
+}
+
+// ── EXIT APP ──
+function exitApp() {
+  isDirty = false;
+  // Jika berjalan di dalam Android Wrapper
+  if (window.AndroidBridge && window.AndroidBridge.exitApp) {
+    window.AndroidBridge.exitApp();
+    return;
+  }
+  // Coba tutup window (berfungsi di PWA standalone & wrapper)
+  window.close();
+  // Fallback jika window.close() diblokir browser
+  setTimeout(() => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // Tampilkan pesan "sudah ditutup"
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;background:#0d0d0d;color:#71717a;font-family:Inter,sans-serif;font-size:15px;text-align:center;padding:24px;">Aplikasi ditutup.<br>Anda bisa menutup tab ini.</div>';
+    }
+  }, 300);
+}
+
+// ── LOAD FILE CONTENT (dari intent/share/URL) ──
+function loadFileContent(content, name) {
+  textarea.value = content;
+  fileNameInp.value = name || 'untitled.txt';
+  textarea.selectionStart = textarea.selectionEnd = 0;
+  lastSavedContent = content;
+  isDirty = false;
+  undoStack = [{ val: content, pos: 0 }];
+  redoStack = [];
+  updateUndoRedoBtns();
+  fullUpdate();
+  scrollCont.scrollTop = 0;
+}
+
+// ── SAVE FILE (helper — actually downloads) ──
+function performSave() {
+  const name = fileNameInp.value.trim() || 'untitled.txt';
+  // Jika berjalan di dalam Android Wrapper
+  if (window.AndroidBridge && window.AndroidBridge.onSaveRequest) {
+    window.AndroidBridge.onSaveRequest(textarea.value, name);
+    isDirty = false;
+    lastSavedContent = textarea.value;
+    return;
+  }
+
+  const blob = new Blob([textarea.value], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  isDirty = false;
+  lastSavedContent = textarea.value;
+}
+
+// ── SAVE FILE (manual — double confirmation) ──
+async function saveFile() {
+  // Konfirmasi pertama
+  const wantSave = await showConfirm(
+    'Apakah anda akan menyimpan perubahan?', 'Simpan', 'Batal'
+  );
+  if (wantSave !== 'ok') return;
+
+  // Konfirmasi kedua (yakin)
+  const sureSave = await showConfirm(
+    'Apakah anda sudah yakin akan menyimpan perubahan?', 'Iya', 'Batal'
+  );
+  if (sureSave !== 'ok') return;
+
+  performSave();
+}
+
+// ── RESIZE OBSERVER ──
+let resizeTimer;
+const ro = new ResizeObserver(() => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    resizeTextarea();
+    syncGutterScroll();
+  }, 100);
+});
+ro.observe(scrollCont);
+
+// ── CONFIRM DIALOG SYSTEM ──
+const confirmDialog = document.getElementById('confirm-dialog');
+const confirmMessageEl = document.getElementById('confirm-message');
+const confirmCancelBtn = document.getElementById('confirm-cancel');
+const confirmOkBtn = document.getElementById('confirm-ok');
+const confirmDiscardBtn = document.getElementById('confirm-discard');
+const confirmBtnsContainer = document.getElementById('confirm-btns');
+let confirmResolve = null;
+
+function showConfirm(message, okText = 'Simpan', cancelText = 'Batal', discardText = null) {
+  return new Promise((resolve) => {
+    confirmMessageEl.textContent = message;
+    confirmOkBtn.textContent = okText;
+    confirmCancelBtn.textContent = cancelText;
+    if (discardText) {
+      confirmDiscardBtn.textContent = discardText;
+      confirmDiscardBtn.style.display = '';
+      confirmBtnsContainer.classList.add('three-buttons');
+    } else {
+      confirmDiscardBtn.style.display = 'none';
+      confirmBtnsContainer.classList.remove('three-buttons');
+    }
+    confirmResolve = resolve;
+    confirmDialog.showModal();
+  });
+}
+
+confirmOkBtn.addEventListener('click', () => {
+  confirmDialog.close();
+  if (confirmResolve) { confirmResolve('ok'); confirmResolve = null; }
+});
+
+confirmCancelBtn.addEventListener('click', () => {
+  confirmDialog.close();
+  if (confirmResolve) { confirmResolve('cancel'); confirmResolve = null; }
+});
+
+confirmDiscardBtn.addEventListener('click', () => {
+  confirmDialog.close();
+  if (confirmResolve) { confirmResolve('discard'); confirmResolve = null; }
+});
+
+// Handle Escape key (fires 'close' after 'cancel')
+confirmDialog.addEventListener('close', () => {
+  if (confirmResolve) { confirmResolve('cancel'); confirmResolve = null; }
+});
+
+// Fallback: closedby not supported — prevent backdrop click from closing
+if (!('closedBy' in HTMLDialogElement.prototype)) {
+  confirmDialog.addEventListener('click', (event) => {
+    if (event.target !== confirmDialog) return;
+    const rect = confirmDialog.getBoundingClientRect();
+    const inside = (
+      rect.top <= event.clientY && event.clientY <= rect.top + rect.height &&
+      rect.left <= event.clientX && event.clientX <= rect.left + rect.width
+    );
+    if (!inside) {
+      // Backdrop click — treat as cancel
+      confirmDialog.close();
+    }
+  });
+}
+
+// ── EXIT PREVENTION ──
+// Browser close / tab close / refresh → native browser dialog
+window.addEventListener('beforeunload', (e) => {
+  if (isDirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// Back button interception (especially for mobile)
+history.pushState({ voidedit: true }, '');
+let exitDialogActive = false;
+
+window.addEventListener('popstate', async () => {
+  if (!isDirty) return; // no unsaved changes, allow navigation
+
+  if (exitDialogActive) {
+    // Dialog already showing, just re-block navigation
+    history.pushState({ voidedit: true }, '');
+    return;
+  }
+
+  // Block navigation by pushing state back
+  history.pushState({ voidedit: true }, '');
+  exitDialogActive = true;
+
+  const result = await showConfirm(
+    'Anda memiliki perubahan yang belum disimpan.',
+    'Simpan Perubahan',
+    'Batal',
+    'Keluar Tanpa Simpan'
+  );
+  exitDialogActive = false;
+
+  if (result === 'ok') {
+    performSave();
+    exitApp();
+  } else if (result === 'discard') {
+    exitApp();
+  }
+  // If 'cancel', state is already pushed — user stays in editor
+});
+
+// ── INIT ──
+lastSavedContent = INITIAL;
+initSettings();
+fullUpdate();
+
+// ── RECEIVE FILE FROM EXTERNAL (intent/share/URL) ──
+// File Handling API — saat app dibuka via "Buka dengan" (PWA)
+if ('launchQueue' in window) {
+  launchQueue.setConsumer(async (launchParams) => {
+    if (launchParams.files && launchParams.files.length > 0) {
+      const fileHandle = launchParams.files[0];
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      loadFileContent(content, file.name);
+    }
+  });
+}
+
+// URL parameter support — wrapper bisa passing via ?file=<url>&name=<filename>
+// atau ?content=<encoded_content>&name=<filename>
+(function handleExternalFile() {
+  const params = new URLSearchParams(window.location.search);
+
+  // Mode 1: file URL → fetch isinya
+  const fileUrl = params.get('file') || params.get('url');
+  if (fileUrl) {
+    fetch(fileUrl)
+      .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(content => {
+        const name = params.get('name') || decodeURIComponent(fileUrl.split('/').pop()) || 'untitled.txt';
+        loadFileContent(content, name);
+      })
+      .catch(err => console.error('Gagal memuat file:', err));
+    return;
+  }
+
+  // Mode 2: konten langsung di URL param (dari Share Target GET)
+  const contentParam = params.get('content') || params.get('text');
+  if (contentParam) {
+    const name = params.get('name') || params.get('title') || 'untitled.txt';
+    loadFileContent(contentParam, name);
+    return;
+  }
+
+  // Mode 3: intent data di URL hash (beberapa wrapper Android)
+  if (window.location.hash && window.location.hash.length > 1) {
+    try {
+      const hashData = JSON.parse(decodeURIComponent(window.location.hash.slice(1)));
+      if (hashData.content) {
+        loadFileContent(hashData.content, hashData.name || 'untitled.txt');
+      }
+    } catch(e) { /* bukan JSON, abaikan */ }
+  }
+})();
+
+// ── SERVICE WORKER REGISTRATION ──
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
+

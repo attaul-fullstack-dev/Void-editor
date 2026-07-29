@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -38,12 +40,17 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val sftp = SftpManager()
     private val prefs by lazy { getSharedPreferences("void_sftp", Context.MODE_PRIVATE) }
+    private val connectionStore by lazy { SftpConnectionStore(this) }
+    private val bookmarkStore by lazy { LocalFolderBookmarkStore(this) }
 
     // Remote path yang sedang dibuka. Jika tidak null, tombol Save menulis ke server.
     private var activeRemotePath: String? = null
 
     // Launcher pemilihan file yang menyalurkan hasil ke handler dinamis.
     private var pickCallback: ((Uri) -> Unit)? = null
+
+    // requestId yang menunggu hasil ACTION_OPEN_DOCUMENT_TREE (Fitur E).
+    private var pendingTreeRequestId: String? = null
 
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -87,6 +94,31 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.data?.let { uri -> cb?.invoke(uri) }
         }
+    }
+
+    // Fitur E: pemilih FOLDER (bukan file). Izin dipertahankan agar tetap bisa dibaca
+    // setelah aplikasi di-restart.
+    private val treePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val requestId = pendingTreeRequestId
+        pendingTreeRequestId = null
+        if (requestId == null) return@registerForActivityResult
+        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        if (uri == null) {
+            emitResult(requestId, "pickTree", false, null, "Pemilihan folder dibatalkan")
+            return@registerForActivityResult
+        }
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
+        val data = JSONObject()
+            .put("treeUri", uri.toString())
+            .put("name", treeDisplayName(uri))
+        emitResult(requestId, "pickTree", true, data, null)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -151,15 +183,99 @@ class MainActivity : AppCompatActivity() {
     private fun loadFileFromUri(uri: Uri) {
         try {
             val fileName = getFileName(uri)
-            val content = contentResolver.openInputStream(uri)
-                ?.bufferedReader(Charsets.UTF_8)
-                ?.readText() ?: return
+            // Gambar tidak punya mode edit teks: langsung tampilkan viewer (Fitur D.1).
+            if (isImage(fileName, contentResolver.getType(uri))) {
+                val bytes = readUriBytes(uri)
+                currentFileUri = null
+                activeRemotePath = null
+                dispatchImage(bytes, mimeFor(fileName, contentResolver.getType(uri)), fileName)
+                return
+            }
+            val content = readUriText(uri)
             currentFileUri = uri
             activeRemotePath = null
             dispatchLoad(content, fileName, null)
         } catch (e: Exception) {
             toast("Gagal buka file: ${e.message}")
         }
+    }
+
+    private fun readUriText(uri: Uri, maxBytes: Long = 2L * 1024 * 1024): String {
+        val bytes = readUriBytes(uri, maxBytes)
+        require(bytes.none { it == 0.toByte() }) { "File biner tidak dapat dibuka di editor teks" }
+        return bytes.toString(Charsets.UTF_8)
+    }
+
+    private fun readUriBytes(uri: Uri, maxBytes: Long = 4L * 1024 * 1024): ByteArray {
+        val stream = contentResolver.openInputStream(uri) ?: error("Tidak dapat membaca file")
+        stream.use { input ->
+            val buffer = ByteArray(8192)
+            val output = java.io.ByteArrayOutputStream()
+            var read = input.read(buffer)
+            while (read >= 0) {
+                if (output.size() + read > maxBytes) error("File terlalu besar (maksimum ${maxBytes / (1024 * 1024)} MB)")
+                output.write(buffer, 0, read)
+                read = input.read(buffer)
+            }
+            return output.toByteArray()
+        }
+    }
+
+    // Kirim gambar ke viewer khusus di WebView (bukan textarea).
+    private fun dispatchImage(bytes: ByteArray, mime: String, name: String) {
+        val payload = JSONObject()
+            .put("name", name)
+            .put("mime", mime)
+            .put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            .toString()
+        webView.post {
+            webView.evaluateJavascript("window.__voidLoadImage && window.__voidLoadImage($payload)", null)
+        }
+    }
+
+    private fun treeDisplayName(uri: Uri): String {
+        val id = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+            ?: return uri.lastPathSegment?.substringAfterLast('/') ?: "Folder"
+        return id.substringAfterLast(':').trimEnd('/').substringAfterLast('/').ifBlank { "Folder" }
+    }
+
+    private fun documentIdOf(uri: Uri): String =
+        if (DocumentsContract.isDocumentUri(this, uri)) DocumentsContract.getDocumentId(uri)
+        else DocumentsContract.getTreeDocumentId(uri)
+
+    // Listing folder SAF lewat DocumentsContract (content URI, bukan java.io.File).
+    private fun listTree(uriString: String): JSONArray {
+        val uri = Uri.parse(uriString)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, documentIdOf(uri))
+        val rows = mutableListOf<JSONObject>()
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val docId = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: docId.substringAfterLast('/')
+                val mime = cursor.getString(2) ?: ""
+                val directory = mime == DocumentsContract.Document.MIME_TYPE_DIR
+                rows += JSONObject()
+                    .put("name", name)
+                    .put("uri", DocumentsContract.buildDocumentUriUsingTree(uri, docId).toString())
+                    .put("directory", directory)
+                    .put("size", if (cursor.isNull(3)) 0L else cursor.getLong(3))
+                    .put("modified", if (cursor.isNull(4)) 0L else cursor.getLong(4))
+                    .put("mime", mime)
+            }
+        } ?: error("Folder tidak dapat dibaca. Tambahkan ulang jalur ini.")
+        val sorted = rows.sortedWith(
+            compareBy<JSONObject>({ !it.optBoolean("directory") }, { it.optString("name").lowercase() })
+        )
+        val array = JSONArray()
+        sorted.forEach { array.put(it) }
+        return array
     }
 
     // Kirim konten file ke editor via JSON agar aman terhadap backtick/backslash/Unicode.
@@ -183,6 +299,25 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {}
         return name
+    }
+
+    private fun extensionOf(name: String) = name.substringAfterLast('.', "").lowercase()
+
+    private fun isImage(name: String, mime: String?): Boolean =
+        mime?.startsWith("image/") == true || extensionOf(name) in IMAGE_EXTENSIONS
+
+    private fun mimeFor(name: String, mime: String?): String {
+        if (mime?.startsWith("image/") == true) return mime
+        return when (extensionOf(name)) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "bmp" -> "image/bmp"
+            "svg" -> "image/svg+xml"
+            "ico" -> "image/x-icon"
+            else -> "application/octet-stream"
+        }
     }
 
     private fun writeToUri(uri: Uri, content: String) {
@@ -332,15 +467,9 @@ class MainActivity : AppCompatActivity() {
         fun sftpConnect(requestId: String, configJson: String) {
             val json = JSONObject(configJson)
             runSftp(requestId, "connect") {
-                val config = SftpManager.Config(
-                    host = json.getString("host").trim(),
-                    port = json.optInt("port", 22),
-                    username = json.getString("username").trim(),
-                    password = json.optString("password").ifEmpty { null },
-                    privateKeyPath = json.optString("privateKeyPath").ifEmpty { null },
-                    passphrase = json.optString("passphrase").ifEmpty { null },
-                    trustedFingerprint = trustedFingerprint(json.getString("host").trim(), json.optInt("port", 22))
-                )
+                val host = json.getString("host").trim()
+                val port = json.optInt("port", 22)
+                val config = configFromJson(json, trustedFingerprint(host, port))
                 when (val outcome = sftp.connect(config)) {
                     is SftpManager.ConnectResult.Connected ->
                         JSONObject().put("status", "connected").put("home", outcome.home)
@@ -531,6 +660,170 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /* ─────────── FITUR A — koneksi SFTP tersimpan ─────────── */
+
+        @JavascriptInterface
+        fun savedConnections(): String {
+            val array = JSONArray()
+            connectionStore.list().forEach { array.put(it.toPublicJson()) }
+            return JSONObject()
+                .put("available", connectionStore.available)
+                .put("items", array)
+                .toString()
+        }
+
+        /** Detail termasuk kredensial — hanya dipanggil saat user membuka dialog Edit. */
+        @JavascriptInterface
+        fun savedConnectionDetail(id: String): String {
+            val saved = connectionStore.get(id) ?: return JSONObject().put("found", false).toString()
+            return saved.toDetailJson().put("found", true).toString()
+        }
+
+        @JavascriptInterface
+        fun saveConnection(configJson: String, label: String): String = wrapSync {
+            val json = JSONObject(configJson)
+            val id = connectionStore.save(label, configFromJson(json), authTypeOf(json))
+            JSONObject().put("id", id)
+        }
+
+        @JavascriptInterface
+        fun updateConnection(id: String, configJson: String, label: String): String = wrapSync {
+            val json = JSONObject(configJson)
+            connectionStore.update(id, label, configFromJson(json), authTypeOf(json))
+            JSONObject().put("id", id)
+        }
+
+        @JavascriptInterface
+        fun renameConnection(id: String, label: String): String = wrapSync {
+            connectionStore.rename(id, label); JSONObject().put("id", id)
+        }
+
+        @JavascriptInterface
+        fun deleteConnection(id: String): String = wrapSync {
+            connectionStore.delete(id); JSONObject().put("id", id)
+        }
+
+        /** Connect memakai kredensial tersimpan — password tidak pernah dikirim ke WebView. */
+        @JavascriptInterface
+        fun sftpConnectSaved(requestId: String, id: String) {
+            runSftp(requestId, "connect") {
+                val saved = connectionStore.get(id) ?: error("Koneksi tersimpan tidak ditemukan")
+                connectOutcome(
+                    savedToConfig(saved, trustedFingerprint(saved.host, saved.port)),
+                    "${saved.username}@${saved.host}"
+                ).put("id", id)
+            }
+        }
+
+        @JavascriptInterface
+        fun sftpTrustSavedHostKey(requestId: String, id: String, fingerprint: String) {
+            runSftp(requestId, "connect") {
+                val saved = connectionStore.get(id) ?: error("Koneksi tersimpan tidak ditemukan")
+                prefs.edit().putString(hostKeyPref(saved.host, saved.port), fingerprint).apply()
+                connectOutcome(savedToConfig(saved, fingerprint), "${saved.username}@${saved.host}")
+                    .put("id", id)
+            }
+        }
+
+        /* ─────────── FITUR C — Select document (satu file lokal) ─────────── */
+
+        @JavascriptInterface
+        fun pickLocalDocument() {
+            runOnUiThread {
+                openFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                })
+            }
+        }
+
+        /* ─────────── FITUR D.1 — auto-viewer gambar remote ──────────�� */
+
+        @JavascriptInterface
+        fun sftpOpenImage(requestId: String, path: String) {
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { sftp.readBytes(path, 4L * 1024 * 1024) } }
+                result.fold(
+                    onSuccess = { bytes ->
+                        val name = path.substringAfterLast('/')
+                        activeRemotePath = null   // gambar bersifat read-only
+                        currentFileUri = null
+                        dispatchImage(bytes, mimeFor(name, null), name)
+                        emitResult(requestId, "openImage", true, JSONObject().put("path", path), null)
+                    },
+                    onFailure = { emitResult(requestId, "openImage", false, null, it.message ?: "Gagal membuka gambar") }
+                )
+            }
+        }
+
+        /* ─────────── FITUR E — bookmark folder lokal (SAF tree) ─────────── */
+
+        @JavascriptInterface
+        fun pickFolderTree(requestId: String) {
+            runOnUiThread {
+                pendingTreeRequestId = requestId
+                treePickerLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+            }
+        }
+
+        @JavascriptInterface
+        fun localBookmarks(): String {
+            val array = JSONArray()
+            bookmarkStore.list().forEach { array.put(it.toJson()) }
+            return array.toString()
+        }
+
+        @JavascriptInterface
+        fun addLocalBookmark(treeUri: String, label: String): String = wrapSync {
+            JSONObject().put("id", bookmarkStore.add(label, treeUri))
+        }
+
+        @JavascriptInterface
+        fun renameLocalBookmark(id: String, label: String): String = wrapSync {
+            bookmarkStore.rename(id, label); JSONObject().put("id", id)
+        }
+
+        @JavascriptInterface
+        fun deleteLocalBookmark(id: String): String = wrapSync {
+            bookmarkStore.delete(id); JSONObject().put("id", id)
+        }
+
+        @JavascriptInterface
+        fun localList(requestId: String, uri: String) {
+            runTask(requestId, "localList") { listTree(uri) }
+        }
+
+        /** Buka file lokal dari folder bookmark: teks ke editor, gambar ke viewer. */
+        @JavascriptInterface
+        fun localOpen(requestId: String, uriString: String) {
+            scope.launch {
+                val uri = Uri.parse(uriString)
+                val prepared = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val name = getFileName(uri)
+                        val mime = contentResolver.getType(uri)
+                        if (isImage(name, mime)) Triple(name, mimeFor(name, mime), readUriBytes(uri))
+                        else Triple(name, "text", readUriText(uri).toByteArray(Charsets.UTF_8))
+                    }
+                }
+                prepared.fold(
+                    onSuccess = { (name, kind, bytes) ->
+                        if (kind == "text") {
+                            currentFileUri = uri
+                            activeRemotePath = null
+                            dispatchLoad(bytes.toString(Charsets.UTF_8), name, null)
+                        } else {
+                            currentFileUri = null
+                            activeRemotePath = null
+                            dispatchImage(bytes, kind, name)
+                        }
+                        emitResult(requestId, "localOpen", true, JSONObject().put("name", name), null)
+                    },
+                    onFailure = { emitResult(requestId, "localOpen", false, null, it.message ?: "Gagal membuka file") }
+                )
+            }
+        }
+
         @JavascriptInterface
         fun loadSettings(): String {
             return JSONObject()
@@ -559,9 +852,66 @@ class MainActivity : AppCompatActivity() {
     private fun hostKeyPref(host: String, port: Int) = "hostkey_${host}_$port"
     private fun trustedFingerprint(host: String, port: Int): String? = prefs.getString(hostKeyPref(host, port), null)
 
+    // Alias generik runSftp — dipakai juga untuk operasi lokal/SAF.
+    private fun runTask(requestId: String, action: String, work: () -> Any?) = runSftp(requestId, action, work)
+
+    /** Hasil sinkron untuk @JavascriptInterface: selalu JSON {ok, ...} / {ok:false, error}. */
+    private inline fun wrapSync(block: () -> JSONObject): String =
+        runCatching { block().put("ok", true) }
+            .getOrElse { JSONObject().put("ok", false).put("error", it.message ?: "Operasi gagal") }
+            .toString()
+
+    private fun authTypeOf(json: JSONObject): String =
+        if (json.optString("privateKeyPath").isNotEmpty()) "key" else "password"
+
+    private fun configFromJson(json: JSONObject, fingerprint: String? = null) = SftpManager.Config(
+        host = json.getString("host").trim(),
+        port = json.optInt("port", 22),
+        username = json.getString("username").trim(),
+        password = json.optString("password").ifEmpty { null },
+        privateKeyPath = json.optString("privateKeyPath").ifEmpty { null },
+        passphrase = json.optString("passphrase").ifEmpty { null },
+        trustedFingerprint = fingerprint
+    )
+
+    private fun savedToConfig(saved: SftpConnectionStore.Saved, fingerprint: String?) = SftpManager.Config(
+        host = saved.host,
+        port = saved.port,
+        username = saved.username,
+        password = saved.password,
+        privateKeyPath = saved.privateKeyPath,
+        passphrase = saved.passphrase,
+        trustedFingerprint = fingerprint
+    )
+
+    private fun connectOutcome(config: SftpManager.Config, label: String): JSONObject =
+        when (val outcome = sftp.connect(config)) {
+            is SftpManager.ConnectResult.Connected ->
+                JSONObject().put("status", "connected").put("home", outcome.home).put("label", label)
+            is SftpManager.ConnectResult.HostKeyRequired ->
+                JSONObject().put("status", "hostKey").put("fingerprint", outcome.fingerprint)
+        }
+
+    private companion object {
+        val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico")
+    }
+
+    /**
+     * WebView ini SPA satu halaman, jadi canGoBack() bukan indikator yang benar: tombol Back
+     * dulu langsung menutup aplikasi dan mengabaikan dialog/overlay/panel yang terbuka.
+     * Sekarang UI web diberi kesempatan menangani Back lebih dulu lewat __voidHandleBack().
+     */
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack()
-        else super.onBackPressed()
+        if (!isWebViewReady) {
+            super.onBackPressed()
+            return
+        }
+        webView.evaluateJavascript(
+            "(function(){ try { return !!(window.__voidHandleBack && window.__voidHandleBack()); } catch (e) { return false; } })()"
+        ) { handled ->
+            // Belum ditangani web (tidak ada dialog/panel terbuka) → tutup activity.
+            if (handled != "true") finish()
+        }
     }
 }

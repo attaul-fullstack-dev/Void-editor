@@ -927,6 +927,36 @@
   .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
   .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; font-size: 14px; }
   @media (min-width: 700px) { #sftp-panel { left: max(0px, calc(50% - 400px)); right: auto; width: 380px; border-right: 1px solid var(--border); box-shadow: 20px 0 50px rgba(0,0,0,.3); } }
+
+  /* ── HUB PENJELAJAH BERKAS (Fitur A / C / E) ── */
+  #explorer-home { flex: 1; min-height: 0; overflow-y: auto; display: none; flex-direction: column; padding: 10px 6px 24px; }
+  #explorer-home.visible { display: flex; }
+  .hub-title { padding: 12px 12px 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+  .hub-empty { padding: 6px 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .badge { flex: 0 0 auto; align-self: center; margin-left: 8px; padding: 3px 7px; border-radius: 6px; background: var(--teal-dim); color: var(--teal); font: 700 10px 'JetBrains Mono', monospace; letter-spacing: .04em; }
+  .badge.local { background: var(--accent-dim); color: var(--accent-hover); }
+  .file-icon.action { background: var(--accent-dim); color: var(--accent-hover); }
+  #local-browser { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  #local-browser.visible { display: flex; }
+  #local-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
+  #local-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #local-list { flex: 1; overflow-y: auto; padding: 6px; }
+
+  /* ── PREVIEW HTML/MARKDOWN (Fitur D.2 / D.3) ── */
+  #preview-overlay, #image-overlay {
+  position: fixed; inset: 0; z-index: 80; display: none; flex-direction: column;
+  background: var(--bg-base); color: var(--text-primary);
+  }
+  #preview-overlay.open, #image-overlay.open { display: flex; }
+  .overlay-head { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
+  .overlay-head .overlay-name { flex: 1; min-width: 0; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overlay-back { min-height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 600; font-size: 13px; cursor: pointer; }
+  #preview-frame { flex: 1; width: 100%; border: 0; background: #ffffff; }
+  #image-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 16px; background: var(--bg-editor); }
+  #image-stage img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: auto; }
+  #image-meta { padding: 9px 14px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 11px; }
+  #btn-preview { display: none; }
+  #btn-preview.available { display: inline-flex; }
 </style>
 </head>
 <body>
@@ -936,7 +966,10 @@
   <!-- TOOLBAR -->
   <div id="toolbar">
     <input id="file-name-input" type="text" value="untitled.js" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    <button class="tb-btn" id="btn-sftp" onclick="openSftpPanel()" aria-label="SFTP Explorer" title="SFTP Explorer">
+    <button class="tb-btn" id="btn-preview" onclick="openPreview()" aria-label="Preview" title="Preview HTML/Markdown">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+    <button class="tb-btn" id="btn-sftp" onclick="openSftpPanel()" aria-label="Penjelajah Berkas" title="Penjelajah Berkas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M7 3v6M17 15v6"/></svg>
     </button>
     <button class="tb-btn" id="btn-search" onclick="openPopup()" aria-label="Cari & Ganti" title="Cari & Ganti">
@@ -1014,15 +1047,25 @@
 <!-- SFTP EXPLORER -->
 <section id="sftp-panel" aria-label="SFTP Explorer">
   <header class="sftp-head">
-    <button class="icon-btn" type="button" onclick="closeSftpPanel()" aria-label="Tutup explorer">‹</button>
-    <div id="sftp-connection-state"><h2>SFTP Explorer</h2><small id="sftp-server-label">Belum terhubung</small></div>
+    <button class="icon-btn" type="button" onclick="explorerBack()" aria-label="Kembali">‹</button>
+    <div id="sftp-connection-state"><h2 id="explorer-title">Penjelajah Berkas</h2><small id="sftp-server-label">Pilih lokasi berkas</small></div>
     <button class="icon-btn" type="button" onclick="openSftpSettings()" aria-label="Pengaturan">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6v.2h-4V21a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 00.3-1.9A1.7 1.7 0 003 14H2.8v-4H3a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 009 4.6 1.7 1.7 0 0010 3v-.2h4V3a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 00-.3 1.9 1.7 1.7 0 001.6 1h.2v4H21a1.7 1.7 0 00-1.6 1z"/></svg>
     </button>
   </header>
 
+  <!-- HUB: aksi + koneksi tersimpan + bookmark folder (Fitur A/C/E) -->
+  <div id="explorer-home">
+    <div class="hub-title">Tambah lokasi</div>
+    <div id="explorer-actions" role="list"></div>
+    <div class="hub-title">Koneksi tersimpan</div>
+    <div id="explorer-saved" role="list"></div>
+    <div class="hub-title">Folder lokal</div>
+    <div id="explorer-bookmarks" role="list"></div>
+  </div>
+
   <div id="sftp-connect-view">
-    <div class="sftp-hero"><h3>Akses file server</h3><p>Sambungkan server melalui SFTP. Fingerprint host selalu diverifikasi sebelum kredensial dikirim.</p></div>
+    <div class="sftp-hero"><h3 id="sftp-form-title">Akses file server</h3><p id="sftp-form-desc">Sambungkan server melalui SFTP. Fingerprint host selalu diverifikasi sebelum kredensial dikirim.</p></div>
     <form class="sftp-form" onsubmit="connectSftp(event)">
       <div class="form-row">
         <div class="field"><label for="sftp-host">Host</label><input id="sftp-host" required placeholder="server.example.com" autocapitalize="off"></div>
@@ -1035,8 +1078,21 @@
         <div class="field"><label>Private key</label><button class="secondary-action" id="sftp-key-button" type="button" onclick="pickSftpKey()">Pilih private key</button><input id="sftp-key-path" type="hidden"></div>
         <div class="field"><label for="sftp-passphrase">Passphrase (opsional)</label><input id="sftp-passphrase" type="password"></div>
       </div>
+      <div class="field"><label for="sftp-label">Nama koneksi (opsional)</label><input id="sftp-label" placeholder="root" autocapitalize="off"></div>
+      <label class="settings-row" id="sftp-remember-row"><span>Simpan koneksi ini (terenkripsi)</span><input id="sftp-remember" type="checkbox" checked></label>
       <button class="primary-action" id="sftp-connect-button" type="submit">Hubungkan</button>
+      <button class="secondary-action" id="sftp-form-cancel" type="button" onclick="showExplorerView('home')">Batal</button>
     </form>
+  </div>
+
+  <!-- BROWSER FOLDER LOKAL (SAF tree) -->
+  <div id="local-browser">
+    <div id="local-toolbar">
+      <button class="icon-btn" type="button" onclick="localGoUp()" aria-label="Naik satu level">↑</button>
+      <span id="local-path-label">/</span>
+      <button class="icon-btn" type="button" onclick="refreshLocal()" aria-label="Refresh">↻</button>
+    </div>
+    <div id="local-list" role="list"></div>
   </div>
 
   <div id="sftp-browser">
@@ -1064,9 +1120,46 @@
 <dialog id="sftp-item-dialog" class="sftp-dialog">
   <div class="dialog-body"><h3 id="sftp-item-title">Aksi item</h3><p id="sftp-item-path"></p><button class="secondary-action" type="button" onclick="renameSelectedItem()">Ubah nama</button><button class="secondary-action" type="button" onclick="copySelectedUri()">Salin URI SFTP</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSelectedItem()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
 </dialog>
+<!-- Long-press koneksi tersimpan: Hapus / Ubah Nama / Edit (Fitur A) -->
+<dialog id="saved-item-dialog" class="sftp-dialog">
+  <div class="dialog-body"><h3 id="saved-item-title">Koneksi</h3><p id="saved-item-sub"></p><button class="secondary-action" type="button" onclick="renameSavedConnection()">Ubah Nama</button><button class="secondary-action" type="button" onclick="editSavedConnection()">Edit</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSavedConnection()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
+</dialog>
+<!-- Long-press bookmark folder lokal: Hapus / Ubah Nama (Fitur E) -->
+<dialog id="bookmark-item-dialog" class="sftp-dialog">
+  <div class="dialog-body"><h3 id="bookmark-item-title">Folder</h3><p id="bookmark-item-sub"></p><button class="secondary-action" type="button" onclick="renameBookmark()">Ubah Nama</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteBookmark()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
+</dialog>
+<!-- Dialog "Tambah jalur" (Fitur E) -->
+<dialog id="addpath-dialog" class="sftp-dialog">
+  <form class="dialog-body" onsubmit="submitAddPath(event)"><h3>Tambah jalur</h3><div class="field"><label for="addpath-uri">Pilih folder</label><input id="addpath-uri" readonly placeholder="Ketuk untuk memilih folder" onclick="pickFolderTree()"></div><div class="field"><label for="addpath-name">Nama Folder</label><input id="addpath-name" autocomplete="off" placeholder="home"></div><div class="dialog-actions"><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Batal</button><button class="primary-action" style="padding:0 16px" type="submit">OK</button></div></form>
+</dialog>
+<!-- Ubah nama generik (koneksi tersimpan / bookmark folder) -->
+<dialog id="label-dialog" class="sftp-dialog">
+  <form class="dialog-body" onsubmit="submitLabel(event)"><h3 id="label-dialog-title">Ubah Nama</h3><div class="field"><label for="label-dialog-value">Nama</label><input id="label-dialog-value" required autocomplete="off"></div><div class="dialog-actions"><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Batal</button><button class="primary-action" style="padding:0 16px" type="submit">Simpan</button></div></form>
+</dialog>
 <dialog id="sftp-settings-dialog" class="sftp-dialog">
   <div class="dialog-body"><h3>Pengaturan Explorer</h3><label class="settings-row"><span>Urutkan nama A–Z</span><input id="setting-sort" type="checkbox"></label><label class="settings-row"><span>Tampilkan file tersembunyi</span><input id="setting-hidden" type="checkbox"></label><label class="settings-row"><span>Refresh otomatis</span><input id="setting-autolist" type="checkbox"></label><div class="dialog-actions"><button class="primary-action" style="padding:0 16px" type="button" onclick="saveSftpSettings()">Simpan</button></div></div>
 </dialog>
+
+<!-- PREVIEW HTML/MARKDOWN — layar penuh terpisah (Fitur D.2/D.3) -->
+<section id="preview-overlay" aria-label="Preview dokumen">
+  <div class="overlay-head">
+    <button class="overlay-back" type="button" onclick="closePreview()">‹ Kembali</button>
+    <span class="overlay-name" id="preview-name"></span>
+  </div>
+  <!-- allow-scripts tanpa allow-same-origin: script halaman jalan, tapi origin opaque
+       sehingga preview tidak bisa menyentuh DOM/localStorage editor. -->
+  <iframe id="preview-frame" title="Preview" sandbox="allow-scripts"></iframe>
+</section>
+
+<!-- AUTO-VIEWER GAMBAR (Fitur D.1) -->
+<section id="image-overlay" aria-label="Penampil gambar">
+  <div class="overlay-head">
+    <button class="overlay-back" type="button" onclick="closeImageViewer()">‹ Kembali</button>
+    <span class="overlay-name" id="image-name"></span>
+  </div>
+  <div id="image-stage"><img id="image-view" alt=""></div>
+  <div id="image-meta"></div>
+</section>
 
 <!-- POPUP SEARCH/REPLACE -->
 <dialog id="popup-dialog" closedby="any" aria-labelledby="popup-title">
@@ -1126,6 +1219,8 @@
   </div>
 </dialog>
 
+<!-- Markdown renderer di-bundle offline (JANGAN pakai CDN: preview harus jalan tanpa internet) -->
+<script src="marked.min.js"></script>
 <script>
 // ── ELEMENTS ──
 const textarea    = document.getElementById('editor-textarea');
@@ -1161,7 +1256,10 @@ let activeQuery = ''; // query aktif untuk highlight, terpisah dari popup state
 let wordWrapOn = false;
 let isDirty = false;
 let lastSavedContent = '';
-let activeRemotePath = null; // jika tidak null, Save menulis ke server SFTP
+// Cermin read-only dari activeRemotePath milik native. HANYA untuk keperluan tampilan
+// (judul file + pesan toast setelah simpan). Routing Save tetap sepenuhnya diputuskan
+// oleh MainActivity, jadi nilai ini tidak boleh dijadikan sumber kebenaran.
+let remoteFileHint = null;
 
 // ── SYNTAX HIGHLIGHTING ──
 function renderSyntaxHighlight(code) {
@@ -1770,8 +1868,11 @@ function exitApp() {
 
 // ── LOAD FILE CONTENT (dari intent/share/URL) ──
 function loadFileContent(content, name) {
+  closeImageViewer();
+  closePreview();
   textarea.value = content;
   fileNameInp.value = name || 'untitled.txt';
+  updatePreviewButton();
   textarea.selectionStart = textarea.selectionEnd = 0;
   lastSavedContent = content;
   isDirty = false;
@@ -1784,19 +1885,123 @@ function loadFileContent(content, name) {
 
 // Kontrak JSON dari native (aman terhadap backtick/backslash/Unicode).
 window.__voidLoadFile = function (payload) {
-  activeRemotePath = payload.remotePath || null;
-  const displayName = activeRemotePath ? (payload.name || activeRemotePath.split('/').pop()) : payload.name;
+  remoteFileHint = payload.remotePath || null;
+  const displayName = remoteFileHint ? (payload.name || remoteFileHint.split('/').pop()) : payload.name;
   loadFileContent(payload.content || '', displayName);
 };
+
+/* ══════════ PREVIEW HTML / MARKDOWN (Fitur D.2 & D.3) ══════════ */
+const previewOverlay = document.getElementById('preview-overlay');
+const previewFrame = document.getElementById('preview-frame');
+const btnPreview = document.getElementById('btn-preview');
+
+function fileExt(name) { return (name || '').split('.').pop().toLowerCase(); }
+
+// Hanya .html/.htm/.md yang bisa dipreview. CSS/JS berdiri sendiri tidak bisa dirender.
+function isPreviewable(name) { return ['html', 'htm', 'md', 'markdown'].includes(fileExt(name)); }
+
+function updatePreviewButton() {
+  btnPreview.classList.toggle('available', isPreviewable(fileNameInp.value.trim()));
+}
+
+const MARKDOWN_CSS = `
+  :root { color-scheme: light }
+  body { margin: 0; padding: 20px 18px 48px; font: 15px/1.65 -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2328; background: #fff; overflow-wrap: anywhere; }
+  h1, h2 { border-bottom: 1px solid #d8dee4; padding-bottom: .3em; }
+  h1, h2, h3, h4 { margin: 1.4em 0 .6em; line-height: 1.3; }
+  p, ul, ol, blockquote, table, pre { margin: 0 0 1em; }
+  code { font: 13px/1.5 ui-monospace, "JetBrains Mono", monospace; background: #eff1f3; padding: .15em .4em; border-radius: 5px; }
+  pre { background: #f6f8fa; padding: 14px; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 4px solid #d0d7de; color: #59636e; padding: 0 1em; }
+  table { border-collapse: collapse; display: block; overflow-x: auto; }
+  th, td { border: 1px solid #d0d7de; padding: 6px 12px; }
+  img { max-width: 100%; }
+  a { color: #0969da; }
+`;
+
+function buildPreviewDocument(name, source) {
+  if (['md', 'markdown'].includes(fileExt(name))) {
+    let body;
+    if (window.marked && typeof window.marked.parse === 'function') {
+      body = window.marked.parse(source, { gfm: true, breaks: false });
+    } else {
+      // Fallback aman bila bundle marked gagal dimuat: tampilkan sebagai teks polos.
+      body = '<pre>' + escHtml(source) + '</pre>';
+    }
+    return `<!doctype html><html lang="id"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<style>${MARKDOWN_CSS}</style></head><body>${body}</body></html>`;
+  }
+  return source;
+}
+
+function openPreview() {
+  const name = fileNameInp.value.trim() || 'untitled.txt';
+  if (!isPreviewable(name)) { sftpToast('Preview hanya untuk file HTML atau Markdown'); return; }
+  // Render isi editor SAAT INI (belum tentu sudah disimpan), sepenuhnya offline.
+  previewFrame.srcdoc = buildPreviewDocument(name, textarea.value);
+  document.getElementById('preview-name').textContent = name;
+  previewOverlay.classList.add('open');
+}
+
+function closePreview() {
+  if (!previewOverlay.classList.contains('open')) return;
+  previewOverlay.classList.remove('open');
+  previewFrame.srcdoc = '';
+}
+
+/* ══════════ AUTO-VIEWER GAMBAR (Fitur D.1) ══════════ */
+const imageOverlay = document.getElementById('image-overlay');
+const imageView = document.getElementById('image-view');
+
+// Dipanggil native saat file gambar dibuka (SFTP, bookmark folder, atau Select document).
+window.__voidLoadImage = function (payload) {
+  // Native selalu mengosongkan activeRemotePath untuk gambar (hanya-baca) — cermin ikut kosong.
+  remoteFileHint = null;
+  const name = payload.name || 'gambar';
+  imageView.src = `data:${payload.mime || 'image/png'};base64,${payload.base64}`;
+  imageView.alt = name;
+  document.getElementById('image-name').textContent = name;
+  const bytes = Math.round((payload.base64 || '').length * 3 / 4);
+  document.getElementById('image-meta').textContent =
+    `${payload.mime || 'image'} · ${formatBytes(bytes)} · hanya-baca (gambar tidak memiliki mode edit teks)`;
+  imageOverlay.classList.add('open');
+  closeSftpPanel();
+};
+
+function closeImageViewer() {
+  if (!imageOverlay.classList.contains('open')) return;
+  imageOverlay.classList.remove('open');
+  imageView.removeAttribute('src');
+}
+
+function isImageName(name) {
+  return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'ico'].includes(fileExt(name));
+}
 
 // ── SAVE FILE (helper — actually downloads) ──
 function performSave() {
   const name = fileNameInp.value.trim() || 'untitled.txt';
   // Jika berjalan di dalam Android Wrapper
   if (window.AndroidBridge && window.AndroidBridge.onSaveRequest) {
-    window.AndroidBridge.onSaveRequest(textarea.value, name);
-    isDirty = false;
-    lastSavedContent = textarea.value;
+    const snapshot = textarea.value;
+    // MainActivity memakai requestId tetap "save-remote" saat menulis ke server. Tanpa
+    // handler ini hasilnya dibuang diam-diam sehingga kegagalan tulis tidak pernah terlihat.
+    if (remoteFileHint) {
+      pendingRequests.set('save-remote', {
+        resolve: () => {
+          if (textarea.value === snapshot) { isDirty = false; lastSavedContent = snapshot; }
+          sftpToast('Tersimpan ke server');
+        },
+        reject: (err) => {
+          isDirty = true;
+          sftpToast('Gagal simpan ke server: ' + err.message);
+        }
+      });
+    }
+    window.AndroidBridge.onSaveRequest(snapshot, name);
+    if (!remoteFileHint) { isDirty = false; lastSavedContent = snapshot; }
     return;
   }
 
@@ -1915,19 +2120,10 @@ window.addEventListener('beforeunload', (e) => {
 history.pushState({ voidedit: true }, '');
 let exitDialogActive = false;
 
-window.addEventListener('popstate', async () => {
-  if (!isDirty) return; // no unsaved changes, allow navigation
-
-  if (exitDialogActive) {
-    // Dialog already showing, just re-block navigation
-    history.pushState({ voidedit: true }, '');
-    return;
-  }
-
-  // Block navigation by pushing state back
-  history.pushState({ voidedit: true }, '');
+// Konfirmasi keluar saat masih ada perubahan belum tersimpan.
+async function confirmExitWithUnsavedChanges() {
+  if (exitDialogActive) return;
   exitDialogActive = true;
-
   const result = await showConfirm(
     'Anda memiliki perubahan yang belum disimpan.',
     'Simpan Perubahan',
@@ -1942,13 +2138,37 @@ window.addEventListener('popstate', async () => {
   } else if (result === 'discard') {
     exitApp();
   }
-  // If 'cancel', state is already pushed — user stays in editor
+  // 'cancel' → user tetap di editor
+}
+
+window.addEventListener('popstate', () => {
+  if (!isDirty) return; // no unsaved changes, allow navigation
+  // Block navigation by pushing state back
+  history.pushState({ voidedit: true }, '');
+  confirmExitWithUnsavedChanges();
 });
+
+/**
+ * Dipanggil MainActivity.onBackPressed. Mengembalikan true bila tombol Back sudah
+ * ditangani oleh UI web (menutup dialog/overlay/panel), false bila aplikasi boleh keluar.
+ * WebView ini SPA satu halaman, jadi webView.canGoBack() bukan indikator yang benar.
+ */
+window.__voidHandleBack = function () {
+  const openDialog = document.querySelector('dialog[open]');
+  if (openDialog) { openDialog.close(); return true; }
+  if (imageOverlay.classList.contains('open')) { closeImageViewer(); return true; }
+  if (previewOverlay.classList.contains('open')) { closePreview(); return true; }
+  if (sftpPanel.classList.contains('open')) { explorerBack(); return true; }
+  if (isDirty) { confirmExitWithUnsavedChanges(); return true; }
+  return false;
+};
 
 // ── INIT ──
 lastSavedContent = INITIAL;
 initSettings();
 fullUpdate();
+updatePreviewButton();
+fileNameInp.addEventListener('input', updatePreviewButton);
 
 // ── RECEIVE FILE FROM EXTERNAL (intent/share/URL) ──
 // File Handling API — saat app dibuka via "Buka dengan" (PWA)
@@ -2002,11 +2222,6 @@ if ('launchQueue' in window) {
     } catch(e) { /* bukan JSON, abaikan */ }
   }
 })();
-
-// ── SERVICE WORKER REGISTRATION ──
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
-}
 
 /* ═══════════════ SFTP EXPLORER ═══════════════ */
 const bridge = window.AndroidBridge;
@@ -2065,11 +2280,449 @@ window.onSftpProgress = function (payload) {
 };
 
 function openSftpPanel() {
-  if (!hasBridge()) { sftpToast('SFTP hanya tersedia di aplikasi Android'); return; }
+  if (!hasBridge()) { sftpToast('Penjelajah Berkas hanya tersedia di aplikasi Android'); return; }
   sftpPanel.classList.add('open');
   loadSftpSettings();
+  if (sftpConnected) showExplorerView('sftp');
+  else { showExplorerView('home'); renderExplorerHome(); }
 }
 function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); }
+
+/* ══════════ HUB PENJELAJAH BERKAS (Fitur A / C / E) ══════════ */
+const explorerHome = document.getElementById('explorer-home');
+const localBrowser = document.getElementById('local-browser');
+const explorerTitle = document.getElementById('explorer-title');
+
+let explorerView = 'home';          // 'home' | 'connect' | 'sftp' | 'local'
+let editingConnectionId = null;     // non-null = form dalam mode Edit
+let selectedSaved = null;           // koneksi tersimpan yang di-long-press
+let selectedBookmark = null;        // bookmark folder yang di-long-press
+let labelTarget = null;             // {kind:'saved'|'bookmark', id}
+let pendingTreeUri = null;          // hasil tree picker untuk dialog "Tambah jalur"
+let localStack = [];                // riwayat navigasi folder lokal
+let localBookmarkLabel = '';
+
+function showExplorerView(view) {
+  explorerView = view;
+  explorerHome.classList.toggle('visible', view === 'home');
+  sftpConnectView.style.display = view === 'connect' ? '' : 'none';
+  sftpBrowser.classList.toggle('visible', view === 'sftp');
+  localBrowser.classList.toggle('visible', view === 'local');
+  if (view === 'home') {
+    // Keluar dari form koneksi selalu membatalkan mode Edit yang tertunda.
+    editingConnectionId = null;
+    explorerTitle.textContent = 'Penjelajah Berkas';
+    sftpServerLabel.textContent = sftpConnected ? 'SFTP aktif' : 'Pilih lokasi berkas';
+  } else if (view === 'local') {
+    explorerTitle.textContent = localBookmarkLabel || 'Folder lokal';
+  } else {
+    explorerTitle.textContent = view === 'connect' ? 'Koneksi SFTP' : 'SFTP Explorer';
+  }
+  closeSftpActions();
+}
+
+// Tombol ‹ di header: dari sub-view kembali ke hub, dari hub tutup panel.
+function explorerBack() {
+  if (explorerView === 'local' && localStack.length > 1) { localGoUp(); return; }
+  if (explorerView === 'home') { closeSftpPanel(); return; }
+  showExplorerView('home');
+  renderExplorerHome();
+}
+
+/**
+ * Tap = onTap, long-press 500ms = onLongPress. Timer dibatalkan saat scroll/gerak
+ * agar scrolling daftar tidak memicu menu. Versi generik dari attachRowGestures.
+ */
+function attachGestures(el, onTap, onLongPress) {
+  let timer = null; let longPressed = false; let startY = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  el.addEventListener('pointerdown', (e) => {
+    longPressed = false; startY = e.clientY;
+    if (!onLongPress) return;
+    timer = setTimeout(() => { longPressed = true; onLongPress(); }, 500);
+  });
+  el.addEventListener('pointermove', (e) => { if (Math.abs(e.clientY - startY) > 10) cancel(); });
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('click', () => {
+    if (longPressed) { longPressed = false; return; }
+    if (onTap) onTap();
+  });
+}
+
+function makeRow({ icon, iconClass, title, meta, badge, onTap, onLongPress }) {
+  const row = document.createElement('button');
+  row.type = 'button'; row.className = 'file-row'; row.setAttribute('role', 'listitem');
+  const iconEl = document.createElement('div');
+  iconEl.className = 'file-icon' + (iconClass ? ' ' + iconClass : '');
+  iconEl.textContent = icon;
+  const info = document.createElement('div'); info.className = 'file-info';
+  const name = document.createElement('span'); name.className = 'file-name'; name.textContent = title;
+  const metaEl = document.createElement('span'); metaEl.className = 'file-meta'; metaEl.textContent = meta || '';
+  info.append(name, metaEl);
+  row.append(iconEl, info);
+  if (badge) {
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'badge' + (badge === 'FOLDER' ? ' local' : '');
+    badgeEl.textContent = badge;
+    row.appendChild(badgeEl);
+  }
+  attachGestures(row, onTap, onLongPress);
+  return row;
+}
+
+function renderExplorerHome() {
+  const actions = document.getElementById('explorer-actions');
+  actions.innerHTML = '';
+  actions.append(
+    makeRow({ icon: '+', iconClass: 'action', title: 'Tambah jalur', meta: 'Bookmark folder di penyimpanan perangkat', onTap: openAddPathDialog }),
+    makeRow({ icon: 'SFTP', iconClass: 'action', title: 'Tambahkan SFTP', meta: 'Sambungkan server baru', onTap: openConnectForm }),
+    makeRow({ icon: 'DOC', iconClass: 'action', title: 'Select document', meta: 'Pilih satu file lalu buka di editor', onTap: selectDocument })
+  );
+  renderSavedConnections();
+  renderBookmarks();
+}
+
+/* ── Fitur A: daftar koneksi SFTP tersimpan ── */
+function renderSavedConnections() {
+  const list = document.getElementById('explorer-saved');
+  list.innerHTML = '';
+  let payload = { available: false, items: [] };
+  try { payload = JSON.parse(bridge.savedConnections()); } catch (_) {}
+  if (!payload.available) {
+    list.appendChild(emptyNote('Penyimpanan terenkripsi tidak tersedia di perangkat ini. Silakan hubungkan server secara manual.'));
+    return;
+  }
+  const items = payload.items || [];
+  if (!items.length) { list.appendChild(emptyNote('Belum ada koneksi tersimpan.')); return; }
+  items.forEach((item) => {
+    list.appendChild(makeRow({
+      icon: 'DIR',
+      title: item.label,
+      meta: `${item.username}@${item.host}:${item.port} · ${item.authType === 'key' ? 'private key' : 'password'}`,
+      badge: 'SFTP',
+      onTap: () => connectSaved(item),
+      onLongPress: () => openSavedMenu(item)
+    }));
+  });
+}
+
+/* ── Fitur E: daftar bookmark folder lokal ── */
+function renderBookmarks() {
+  const list = document.getElementById('explorer-bookmarks');
+  list.innerHTML = '';
+  let items = [];
+  try { items = JSON.parse(bridge.localBookmarks()) || []; } catch (_) {}
+  if (!items.length) { list.appendChild(emptyNote('Belum ada folder. Gunakan "Tambah jalur".')); return; }
+  items.forEach((item) => {
+    list.appendChild(makeRow({
+      icon: 'DIR',
+      title: item.label,
+      meta: decodeURIComponent(item.treeUri),
+      badge: 'FOLDER',
+      onTap: () => openBookmark(item),
+      onLongPress: () => openBookmarkMenu(item)
+    }));
+  });
+}
+
+function emptyNote(text) {
+  const note = document.createElement('div');
+  note.className = 'hub-empty'; note.textContent = text;
+  return note;
+}
+
+/* ── Form koneksi: mode tambah & mode edit ── */
+function openConnectForm(saved) {
+  editingConnectionId = saved ? saved.id : null;
+  const isEdit = !!saved;
+  document.getElementById('sftp-form-title').textContent = isEdit ? 'Edit koneksi' : 'Akses file server';
+  document.getElementById('sftp-form-desc').textContent = isEdit
+    ? 'Ubah data koneksi lalu simpan. Password disimpan terenkripsi di perangkat.'
+    : 'Sambungkan server melalui SFTP. Fingerprint host selalu diverifikasi sebelum kredensial dikirim.';
+  document.getElementById('sftp-host').value = saved ? saved.host : '';
+  document.getElementById('sftp-port').value = saved ? saved.port : 22;
+  document.getElementById('sftp-user').value = saved ? saved.username : '';
+  document.getElementById('sftp-auth').value = saved ? saved.authType : 'password';
+  document.getElementById('sftp-password').value = saved ? (saved.password || '') : '';
+  document.getElementById('sftp-key-path').value = saved ? (saved.privateKeyPath || '') : '';
+  document.getElementById('sftp-passphrase').value = saved ? (saved.passphrase || '') : '';
+  document.getElementById('sftp-key-button').textContent =
+    saved && saved.privateKeyPath ? saved.privateKeyPath.split('/').pop() : 'Pilih private key';
+  document.getElementById('sftp-label').value = saved ? saved.label : '';
+  document.getElementById('sftp-remember-row').style.display = isEdit ? 'none' : '';
+  document.getElementById('sftp-connect-button').textContent = isEdit ? 'Simpan Perubahan' : 'Hubungkan';
+  toggleSftpAuth();
+  showExplorerView('connect');
+}
+
+/* ── Fitur C: Select document ── */
+function selectDocument() {
+  if (!bridge.pickLocalDocument) { sftpToast('Fitur ini butuh versi aplikasi terbaru'); return; }
+  bridge.pickLocalDocument();
+  closeSftpPanel();
+}
+
+/**
+ * Pembungkus @JavascriptInterface sinkron. Semua method wrapSync di MainActivity
+ * mengembalikan JSON {ok:true,...} atau {ok:false,error}. Melempar Error bila gagal.
+ */
+function callSync(invoke, label) {
+  let result;
+  try { result = JSON.parse(invoke()); }
+  catch (_) { throw new Error(label + ' gagal: penyimpanan tidak merespons'); }
+  if (!result || !result.ok) throw new Error((result && result.error) || (label + ' gagal'));
+  return result;
+}
+
+/* ══════════ FITUR A — koneksi SFTP tersimpan ══════════ */
+
+// Koneksi tersimpan yang sedang menunggu konfirmasi fingerprint host.
+let pendingSavedConnect = null;
+
+// Tap baris koneksi tersimpan: kredensial dibaca di sisi native, tidak pernah masuk WebView.
+async function connectSaved(item) {
+  pendingConnectConfig = null;
+  pendingSavedConnect = { id: item.id, label: item.label };
+  sftpToast('Menghubungkan ke ' + item.label + '…');
+  try {
+    const data = await callBridge('conn-' + Date.now(), (id) => bridge.sftpConnectSaved(id, item.id));
+    if (data.status === 'hostKey') {
+      pendingSavedConnect.fingerprint = data.fingerprint;
+      document.getElementById('sftp-fingerprint').textContent = data.fingerprint;
+      document.getElementById('sftp-hostkey-dialog').showModal();
+      return;
+    }
+    pendingSavedConnect = null;
+    onConnected(null, data.home || '/', { label: data.label || item.label });
+  } catch (err) {
+    pendingSavedConnect = null;
+    sftpToast(err.message);
+  }
+}
+
+function openSavedMenu(item) {
+  selectedSaved = item;
+  document.getElementById('saved-item-title').textContent = item.label;
+  document.getElementById('saved-item-sub').textContent =
+    `${item.username}@${item.host}:${item.port}`;
+  document.getElementById('saved-item-dialog').showModal();
+}
+
+function renameSavedConnection() {
+  document.getElementById('saved-item-dialog').close();
+  if (!selectedSaved) return;
+  openLabelDialog('saved', selectedSaved.id, selectedSaved.label);
+}
+
+// Mode edit memerlukan kredensial, jadi diambil lewat savedConnectionDetail (sekali pakai).
+function editSavedConnection() {
+  document.getElementById('saved-item-dialog').close();
+  if (!selectedSaved) return;
+  let detail = null;
+  try { detail = JSON.parse(bridge.savedConnectionDetail(selectedSaved.id)); } catch (_) {}
+  if (!detail || !detail.found) { sftpToast('Koneksi tersimpan tidak ditemukan'); return; }
+  openConnectForm(detail);
+}
+
+async function deleteSavedConnection() {
+  document.getElementById('saved-item-dialog').close();
+  if (!selectedSaved) return;
+  const target = selectedSaved;
+  const ok = await showConfirm(`Hapus koneksi "${target.label}"?`, 'Hapus', 'Batal');
+  if (ok !== 'ok') return;
+  try {
+    callSync(() => bridge.deleteConnection(target.id), 'Hapus koneksi');
+    sftpToast('Koneksi dihapus');
+  } catch (err) { sftpToast(err.message); }
+  selectedSaved = null;
+  renderSavedConnections();
+}
+
+// Simpan koneksi baru setelah connect berhasil, bila checkbox "Simpan koneksi" aktif.
+function persistConnection(config) {
+  const remember = document.getElementById('sftp-remember');
+  if (!remember || !remember.checked || !bridge.saveConnection) return;
+  const label = document.getElementById('sftp-label').value.trim();
+  try {
+    callSync(() => bridge.saveConnection(JSON.stringify(config), label), 'Simpan koneksi');
+  } catch (err) {
+    // Koneksi tetap aktif walaupun penyimpanan gagal — cukup beri tahu user.
+    sftpToast(err.message);
+  }
+}
+
+/* ══════════ FITUR E — bookmark folder lokal (SAF tree) ══════════ */
+
+function openAddPathDialog() {
+  if (!bridge.pickFolderTree) { sftpToast('Fitur ini butuh versi aplikasi terbaru'); return; }
+  pendingTreeUri = null;
+  document.getElementById('addpath-uri').value = '';
+  document.getElementById('addpath-name').value = '';
+  document.getElementById('addpath-dialog').showModal();
+}
+
+// Membuka ACTION_OPEN_DOCUMENT_TREE. Izin dipertahankan native agar tetap terbaca
+// setelah aplikasi di-restart.
+async function pickFolderTree() {
+  try {
+    const data = await callBridge(null, (id) => bridge.pickFolderTree(id));
+    pendingTreeUri = data.treeUri;
+    document.getElementById('addpath-uri').value = decodeURIComponent(data.treeUri);
+    const nameInput = document.getElementById('addpath-name');
+    if (!nameInput.value.trim()) nameInput.value = data.name || 'Folder';
+  } catch (err) { sftpToast(err.message); }
+}
+
+function submitAddPath(event) {
+  event.preventDefault();
+  if (!pendingTreeUri) { sftpToast('Pilih folder terlebih dahulu'); return; }
+  const label = document.getElementById('addpath-name').value.trim();
+  try {
+    callSync(() => bridge.addLocalBookmark(pendingTreeUri, label), 'Tambah folder');
+    document.getElementById('addpath-dialog').close();
+    pendingTreeUri = null;
+    sftpToast('Folder ditambahkan');
+    renderBookmarks();
+  } catch (err) { sftpToast(err.message); }
+}
+
+function openBookmarkMenu(item) {
+  selectedBookmark = item;
+  document.getElementById('bookmark-item-title').textContent = item.label;
+  document.getElementById('bookmark-item-sub').textContent = decodeURIComponent(item.treeUri);
+  document.getElementById('bookmark-item-dialog').showModal();
+}
+
+function renameBookmark() {
+  document.getElementById('bookmark-item-dialog').close();
+  if (!selectedBookmark) return;
+  openLabelDialog('bookmark', selectedBookmark.id, selectedBookmark.label);
+}
+
+async function deleteBookmark() {
+  document.getElementById('bookmark-item-dialog').close();
+  if (!selectedBookmark) return;
+  const target = selectedBookmark;
+  const ok = await showConfirm(
+    `Hapus folder "${target.label}" dari daftar? File di perangkat tidak dihapus.`, 'Hapus', 'Batal'
+  );
+  if (ok !== 'ok') return;
+  try {
+    callSync(() => bridge.deleteLocalBookmark(target.id), 'Hapus folder');
+    sftpToast('Folder dihapus dari daftar');
+  } catch (err) { sftpToast(err.message); }
+  selectedBookmark = null;
+  renderBookmarks();
+}
+
+/* ── Dialog "Ubah Nama" dipakai bersama koneksi & bookmark ── */
+function openLabelDialog(kind, id, current) {
+  labelTarget = { kind, id };
+  document.getElementById('label-dialog-title').textContent = 'Ubah Nama';
+  const input = document.getElementById('label-dialog-value');
+  input.value = current || '';
+  document.getElementById('label-dialog').showModal();
+  setTimeout(() => input.focus(), 50);
+}
+
+function submitLabel(event) {
+  event.preventDefault();
+  if (!labelTarget) return;
+  const value = document.getElementById('label-dialog-value').value.trim();
+  if (!value) { sftpToast('Nama tidak boleh kosong'); return; }
+  const target = labelTarget;
+  labelTarget = null;
+  document.getElementById('label-dialog').close();
+  try {
+    if (target.kind === 'saved') {
+      callSync(() => bridge.renameConnection(target.id, value), 'Ubah nama');
+      renderSavedConnections();
+    } else {
+      callSync(() => bridge.renameLocalBookmark(target.id, value), 'Ubah nama');
+      renderBookmarks();
+    }
+    sftpToast('Nama diubah');
+  } catch (err) { sftpToast(err.message); }
+}
+
+/* ── Browser folder lokal ── */
+
+// localStack menyimpan jejak navigasi: [{uri, label}, …]. Elemen terakhir = folder aktif.
+function openBookmark(item) {
+  localBookmarkLabel = item.label;
+  localStack = [{ uri: item.treeUri, label: item.label }];
+  showExplorerView('local');
+  loadLocalList();
+}
+
+function localGoUp() {
+  if (localStack.length > 1) {
+    localStack.pop();
+    loadLocalList();
+    return;
+  }
+  showExplorerView('home');
+  renderExplorerHome();
+}
+
+function refreshLocal() { if (localStack.length) loadLocalList(); }
+
+function renderLocalState(message) {
+  const list = document.getElementById('local-list');
+  list.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'state-box'; box.textContent = message;
+  list.appendChild(box);
+}
+
+async function loadLocalList() {
+  const current = localStack[localStack.length - 1];
+  if (!current) { showExplorerView('home'); renderExplorerHome(); return; }
+  document.getElementById('local-path-label').textContent =
+    localStack.map((item) => item.label).join(' / ');
+  renderLocalState('Memuat…');
+  try {
+    const entries = await callBridge(null, (id) => bridge.localList(id, current.uri));
+    renderLocalEntries(entries || []);
+  } catch (err) {
+    renderLocalState('Gagal memuat: ' + err.message);
+  }
+}
+
+function renderLocalEntries(entries) {
+  const list = document.getElementById('local-list');
+  list.innerHTML = '';
+  if (!entries.length) { renderLocalState('Folder kosong'); return; }
+  entries.forEach((entry) => {
+    const ext = (entry.name.split('.').pop() || '').slice(0, 3).toUpperCase();
+    const isImg = !entry.directory && isImageName(entry.name);
+    list.appendChild(makeRow({
+      icon: entry.directory ? 'DIR' : (isImg ? 'IMG' : (ext || 'TXT')),
+      title: entry.name,
+      meta: entry.directory
+        ? 'Folder'
+        : `${formatBytes(entry.size)} · ${entry.modified ? new Date(entry.modified).toLocaleDateString('id-ID') : '—'}`,
+      onTap: () => {
+        if (entry.directory) {
+          localStack.push({ uri: entry.uri, label: entry.name });
+          loadLocalList();
+        } else {
+          openLocalFile(entry);
+        }
+      }
+    }));
+  });
+}
+
+// Native memutuskan sendiri: teks → editor, gambar → viewer (Fitur D.1).
+async function openLocalFile(entry) {
+  sftpToast('Membuka ' + entry.name + '…');
+  try {
+    await callBridge(null, (id) => bridge.localOpen(id, entry.uri));
+    closeSftpPanel();
+  } catch (err) { sftpToast(err.message); }
+}
 
 function toggleSftpAuth() {
   const mode = document.getElementById('sftp-auth').value;
@@ -2098,8 +2751,23 @@ function buildConnectConfig() {
 async function connectSftp(event) {
   event.preventDefault();
   const button = document.getElementById('sftp-connect-button');
+  const originalLabel = button.textContent;
   try {
     const config = buildConnectConfig();
+    // Mode edit hanya memperbarui data tersimpan, tidak ikut menyambung.
+    if (editingConnectionId) {
+      const label = document.getElementById('sftp-label').value.trim();
+      callSync(
+        () => bridge.updateConnection(editingConnectionId, JSON.stringify(config), label),
+        'Simpan koneksi'
+      );
+      editingConnectionId = null;
+      sftpToast('Koneksi diperbarui');
+      showExplorerView('home');
+      renderExplorerHome();
+      return;
+    }
+    pendingSavedConnect = null;
     pendingConnectConfig = config;
     button.disabled = true; button.textContent = 'Menghubungkan…';
     const data = await callBridge('conn-' + Date.now(), (id) => bridge.sftpConnect(id, JSON.stringify(config)));
@@ -2107,7 +2775,7 @@ async function connectSftp(event) {
   } catch (err) {
     sftpToast(err.message);
   } finally {
-    button.disabled = false; button.textContent = 'Hubungkan';
+    button.disabled = false; button.textContent = originalLabel;
   }
 }
 
@@ -2118,36 +2786,60 @@ function handleConnectResult(data, config) {
     document.getElementById('sftp-hostkey-dialog').showModal();
     return;
   }
-  onConnected(config, data.home || '/');
+  onConnected(config, data.home || '/', { persist: true });
 }
 
 async function trustHostKey() {
   document.getElementById('sftp-hostkey-dialog').close();
+  // Koneksi tersimpan memakai jalur khusus agar kredensial tetap di sisi native.
+  if (pendingSavedConnect && pendingSavedConnect.fingerprint) {
+    const target = pendingSavedConnect;
+    pendingSavedConnect = null;
+    try {
+      const data = await callBridge('conn-' + Date.now(),
+        (id) => bridge.sftpTrustSavedHostKey(id, target.id, target.fingerprint));
+      if (data.status === 'connected') {
+        onConnected(null, data.home || '/', { label: data.label || target.label });
+      }
+    } catch (err) { sftpToast(err.message); }
+    return;
+  }
   if (!pendingConnectConfig) return;
   try {
     const config = pendingConnectConfig;
     const data = await callBridge('conn-' + Date.now(), (id) => bridge.sftpTrustHostKey(id, JSON.stringify(config)));
-    if (data.status === 'connected') onConnected(config, data.home || '/');
+    if (data.status === 'connected') onConnected(config, data.home || '/', { persist: true });
   } catch (err) { sftpToast(err.message); }
 }
-function rejectHostKey() { document.getElementById('sftp-hostkey-dialog').close(); pendingConnectConfig = null; sftpToast('Koneksi dibatalkan'); }
 
-function onConnected(config, home) {
+function rejectHostKey() {
+  document.getElementById('sftp-hostkey-dialog').close();
+  pendingConnectConfig = null;
+  pendingSavedConnect = null;
+  sftpToast('Koneksi dibatalkan');
+}
+
+/**
+ * config null = tersambung lewat koneksi tersimpan (label datang dari native).
+ * options.persist = simpan koneksi baru bila checkbox "Simpan koneksi" aktif.
+ */
+function onConnected(config, home, options) {
+  const opts = options || {};
   sftpConnected = true;
-  sftpServerLabel.textContent = `${config.username}@${config.host}`;
-  sftpConnectView.style.display = 'none';
-  sftpBrowser.classList.add('visible');
+  sftpServerLabel.textContent = opts.label || (config ? `${config.username}@${config.host}` : 'SFTP aktif');
+  if (opts.persist && config) persistConnection(config);
+  showExplorerView('sftp');
   navigateTo(home || '/');
 }
 
 async function disconnectSftp() {
   try { await callBridge(null, (id) => bridge.sftpDisconnect(id)); } catch (_) {}
   sftpConnected = false;
-  sftpBrowser.classList.remove('visible');
-  sftpConnectView.style.display = '';
-  sftpServerLabel.textContent = 'Belum terhubung';
   sftpListEl.innerHTML = '';
   closeSftpActions();
+  // Kembali ke hub, bukan ke form koneksi — daftar koneksi tersimpan ada di hub.
+  showExplorerView('home');
+  renderExplorerHome();
 }
 
 function navigateTo(path) {
@@ -2216,11 +2908,14 @@ function renderEntries(entries) {
     const row = document.createElement('button');
     row.type = 'button'; row.className = 'file-row'; row.setAttribute('role', 'listitem');
     const icon = document.createElement('div'); icon.className = 'file-icon';
-    icon.textContent = entry.directory ? 'DIR' : (entry.name.split('.').pop().slice(0, 3).toUpperCase() || 'TXT');
+    const isImg = !entry.directory && isImageName(entry.name);
+    icon.textContent = entry.directory ? 'DIR' : (isImg ? 'IMG' : (entry.name.split('.').pop().slice(0, 3).toUpperCase() || 'TXT'));
     const info = document.createElement('div'); info.className = 'file-info';
     const name = document.createElement('span'); name.className = 'file-name'; name.textContent = entry.name; // textContent mencegah HTML injection
     const meta = document.createElement('span'); meta.className = 'file-meta';
-    meta.textContent = entry.directory ? 'Folder' : `${formatBytes(entry.size)} · ${new Date(entry.modified).toLocaleDateString('id-ID')}`;
+    meta.textContent = entry.directory
+      ? 'Folder'
+      : `${formatBytes(entry.size)} · ${new Date(entry.modified).toLocaleDateString('id-ID')}${isImg ? ' · gambar' : ''}`;
     info.append(name, meta);
     row.append(icon, info);
     attachRowGestures(row, entry);
@@ -2246,10 +2941,19 @@ function attachRowGestures(row, entry) {
   });
 }
 
+/**
+ * Gambar tidak punya mode edit teks: dibaca sebagai biner lalu dibuka di viewer
+ * (Fitur D.1). File lain tetap masuk editor. Cek tipe dilakukan di satu tempat
+ * ini saja — native yang menentukan state "sumber file" (activeRemotePath).
+ */
 async function openRemoteFile(entry) {
+  const image = isImageName(entry.name);
+  if (image && !bridge.sftpOpenImage) { sftpToast('Fitur ini butuh versi aplikasi terbaru'); return; }
   sftpToast('Membuka ' + entry.name + '…');
   try {
-    await callBridge(null, (id) => bridge.sftpOpenFile(id, entry.path));
+    await callBridge(null, (id) =>
+      image ? bridge.sftpOpenImage(id, entry.path) : bridge.sftpOpenFile(id, entry.path)
+    );
     closeSftpPanel();
   } catch (err) { sftpToast(err.message); }
 }
@@ -2335,7 +3039,9 @@ async function deleteSelectedItem() {
   try {
     await callBridge(null, (id) => bridge.sftpDelete(id, entry.path));
     sftpToast('Terhapus');
-    if (activeRemotePath === entry.path) activeRemotePath = null;
+    // MainActivity.sftpDelete sudah mengosongkan activeRemotePath-nya sendiri;
+    // JS tidak boleh ikut menulis state itu agar tidak terjadi desinkronisasi.
+    if (remoteFileHint === entry.path) remoteFileHint = null;
     listDir();
   } catch (err) { sftpToast(err.message); }
   selectedEntry = null;

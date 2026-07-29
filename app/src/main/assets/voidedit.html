@@ -866,6 +866,67 @@
   #confirm-btns.three-buttons .confirm-btn.primary { order: -1; }
   #confirm-btns.three-buttons .confirm-btn.discard { order: 0; }
   #confirm-btns.three-buttons .confirm-btn.cancel { order: 1; }
+
+  /* ── SFTP EXPLORER ── */
+  #btn-sftp { color: var(--teal); background: var(--teal-dim); border-color: var(--border-subtle); }
+  #sftp-panel {
+    position: fixed; inset: 0; z-index: 60; display: none; flex-direction: column;
+    background: var(--bg-base); color: var(--text-primary);
+  }
+  #sftp-panel.open { display: flex; }
+  .sftp-head { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
+  .sftp-head h2 { flex: 1; font-size: 16px; line-height: 1.4; }
+  .icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--text-primary); font-size: 20px; cursor: pointer; }
+  .icon-btn svg { width: 19px; height: 19px; }
+  #sftp-connection-state { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  #sftp-connection-state small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+  #sftp-connect-view { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+  .sftp-hero { padding: 18px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-surface); }
+  .sftp-hero h3 { font-size: 19px; margin-bottom: 6px; }
+  .sftp-hero p { color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+  .sftp-form { display: flex; flex-direction: column; gap: 12px; }
+  .form-row { display: flex; gap: 10px; }
+  .field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .field.port { flex: 0 0 84px; }
+  .field label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+  .field input, .field select { min-height: 42px; width: 100%; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--text-primary); padding: 9px 11px; font: inherit; font-size: 14px; outline: none; }
+  .field input:focus, .field select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-dim); }
+  .primary-action { min-height: 44px; border: 0; border-radius: 10px; background: var(--teal); color: var(--bg-base); font-weight: 700; font-size: 14px; cursor: pointer; }
+  .secondary-action { min-height: 40px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 600; padding: 0 12px; cursor: pointer; }
+  #key-fields { display: none; flex-direction: column; gap: 12px; }
+  #key-fields.visible { display: flex; }
+  #sftp-browser { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  #sftp-browser.visible { display: flex; }
+  #sftp-breadcrumb { display: flex; gap: 4px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); scrollbar-width: none; }
+  .crumb { flex: 0 0 auto; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); padding: 6px 7px; font-size: 13px; cursor: pointer; }
+  .crumb:last-child { color: var(--teal); background: var(--teal-dim); }
+  #sftp-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
+  #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sftp-list { flex: 1; overflow-y: auto; padding: 6px; }
+  .file-row { width: 100%; display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; touch-action: pan-y; }
+  .file-row:active { background: var(--bg-elevated); }
+  .file-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); color: var(--teal); font: 700 12px 'JetBrains Mono', monospace; }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { display: block; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-meta { display: block; color: var(--text-muted); font-size: 11px; margin-top: 5px; }
+  .state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); text-align: center; padding: 24px; line-height: 1.5; }
+  #sftp-fab { position: absolute; right: 18px; bottom: 20px; width: 52px; height: 52px; border: 0; border-radius: 16px; background: var(--teal); color: var(--bg-base); font-size: 28px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; }
+  #sftp-action-menu { position: absolute; right: 18px; bottom: 80px; display: none; width: 190px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+  #sftp-action-menu.open { display: flex; flex-direction: column; }
+  .menu-action { border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 11px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  .menu-action:active { background: var(--bg-elevated); }
+  #sftp-progress { display: none; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }
+  #sftp-progress.visible { display: block; }
+  #sftp-toast { position: fixed; left: 50%; bottom: 22px; z-index: 100; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 9px; background: var(--text-primary); color: var(--bg-base); font-size: 13px; transition: .2s; }
+  #sftp-toast.visible { transform: translate(-50%, 0); opacity: 1; }
+  .sftp-dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--bg-surface); color: var(--text-primary); width: min(360px, calc(100% - 28px)); padding: 0; margin: auto; }
+  .sftp-dialog::backdrop { background: rgba(0,0,0,.7); }
+  .dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .dialog-body h3 { font-size: 17px; }
+  .dialog-body p { color: var(--text-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; font-size: 14px; }
+  @media (min-width: 700px) { #sftp-panel { left: max(0px, calc(50% - 400px)); right: auto; width: 380px; border-right: 1px solid var(--border); box-shadow: 20px 0 50px rgba(0,0,0,.3); } }
 </style>
 </head>
 <body>
@@ -875,6 +936,9 @@
   <!-- TOOLBAR -->
   <div id="toolbar">
     <input id="file-name-input" type="text" value="untitled.js" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <button class="tb-btn" id="btn-sftp" onclick="openSftpPanel()" aria-label="SFTP Explorer" title="SFTP Explorer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M7 3v6M17 15v6"/></svg>
+    </button>
     <button class="tb-btn" id="btn-search" onclick="openPopup()" aria-label="Cari & Ganti" title="Cari & Ganti">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
     </button>
@@ -946,6 +1010,63 @@
   </div>
 
 </div>
+
+<!-- SFTP EXPLORER -->
+<section id="sftp-panel" aria-label="SFTP Explorer">
+  <header class="sftp-head">
+    <button class="icon-btn" type="button" onclick="closeSftpPanel()" aria-label="Tutup explorer">‹</button>
+    <div id="sftp-connection-state"><h2>SFTP Explorer</h2><small id="sftp-server-label">Belum terhubung</small></div>
+    <button class="icon-btn" type="button" onclick="openSftpSettings()" aria-label="Pengaturan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6v.2h-4V21a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 00.3-1.9A1.7 1.7 0 003 14H2.8v-4H3a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 009 4.6 1.7 1.7 0 0010 3v-.2h4V3a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 00-.3 1.9 1.7 1.7 0 001.6 1h.2v4H21a1.7 1.7 0 00-1.6 1z"/></svg>
+    </button>
+  </header>
+
+  <div id="sftp-connect-view">
+    <div class="sftp-hero"><h3>Akses file server</h3><p>Sambungkan server melalui SFTP. Fingerprint host selalu diverifikasi sebelum kredensial dikirim.</p></div>
+    <form class="sftp-form" onsubmit="connectSftp(event)">
+      <div class="form-row">
+        <div class="field"><label for="sftp-host">Host</label><input id="sftp-host" required placeholder="server.example.com" autocapitalize="off"></div>
+        <div class="field port"><label for="sftp-port">Port</label><input id="sftp-port" required type="number" min="1" max="65535" value="22"></div>
+      </div>
+      <div class="field"><label for="sftp-user">Username</label><input id="sftp-user" required autocapitalize="off"></div>
+      <div class="field"><label for="sftp-auth">Autentikasi</label><select id="sftp-auth" onchange="toggleSftpAuth()"><option value="password">Password</option><option value="key">Private key</option></select></div>
+      <div class="field" id="password-field"><label for="sftp-password">Password</label><input id="sftp-password" type="password" autocomplete="current-password"></div>
+      <div id="key-fields">
+        <div class="field"><label>Private key</label><button class="secondary-action" id="sftp-key-button" type="button" onclick="pickSftpKey()">Pilih private key</button><input id="sftp-key-path" type="hidden"></div>
+        <div class="field"><label for="sftp-passphrase">Passphrase (opsional)</label><input id="sftp-passphrase" type="password"></div>
+      </div>
+      <button class="primary-action" id="sftp-connect-button" type="submit">Hubungkan</button>
+    </form>
+  </div>
+
+  <div id="sftp-browser">
+    <nav id="sftp-breadcrumb" aria-label="Lokasi remote"></nav>
+    <div id="sftp-toolbar"><span id="sftp-path-label">/</span><button class="icon-btn" type="button" onclick="refreshSftp()" aria-label="Refresh">↻</button><button class="secondary-action" type="button" onclick="disconnectSftp()">Putus</button></div>
+    <div id="sftp-progress" aria-live="polite"></div>
+    <div id="sftp-list" role="list"></div>
+    <div id="sftp-action-menu">
+      <button class="menu-action" onclick="promptCreate('file')">File baru</button>
+      <button class="menu-action" onclick="promptCreate('folder')">Folder baru</button>
+      <button class="menu-action" onclick="uploadSftpFile()">Upload file</button>
+      <button class="menu-action" onclick="importSftpZip()">Import ZIP</button>
+    </div>
+    <button id="sftp-fab" type="button" onclick="toggleSftpActions()" aria-label="Tambah">+</button>
+  </div>
+</section>
+<div id="sftp-toast" role="status" aria-live="polite"></div>
+
+<dialog id="sftp-input-dialog" class="sftp-dialog">
+  <form class="dialog-body" onsubmit="submitSftpInput(event)"><h3 id="sftp-input-title">Item baru</h3><div class="field"><label for="sftp-input-value">Nama</label><input id="sftp-input-value" required autocomplete="off"></div><div class="dialog-actions"><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Batal</button><button class="primary-action" style="padding:0 16px" type="submit">Simpan</button></div></form>
+</dialog>
+<dialog id="sftp-hostkey-dialog" class="sftp-dialog">
+  <div class="dialog-body"><h3>Verifikasi server</h3><p>Pastikan fingerprint SHA-256 ini sesuai dengan server Anda:</p><p id="sftp-fingerprint" style="font-family:'JetBrains Mono',monospace;color:var(--teal)"></p><div class="dialog-actions"><button class="secondary-action" type="button" onclick="rejectHostKey()">Batal</button><button class="primary-action" style="padding:0 16px" type="button" onclick="trustHostKey()">Percayai</button></div></div>
+</dialog>
+<dialog id="sftp-item-dialog" class="sftp-dialog">
+  <div class="dialog-body"><h3 id="sftp-item-title">Aksi item</h3><p id="sftp-item-path"></p><button class="secondary-action" type="button" onclick="renameSelectedItem()">Ubah nama</button><button class="secondary-action" type="button" onclick="copySelectedUri()">Salin URI SFTP</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSelectedItem()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
+</dialog>
+<dialog id="sftp-settings-dialog" class="sftp-dialog">
+  <div class="dialog-body"><h3>Pengaturan Explorer</h3><label class="settings-row"><span>Urutkan nama A–Z</span><input id="setting-sort" type="checkbox"></label><label class="settings-row"><span>Tampilkan file tersembunyi</span><input id="setting-hidden" type="checkbox"></label><label class="settings-row"><span>Refresh otomatis</span><input id="setting-autolist" type="checkbox"></label><div class="dialog-actions"><button class="primary-action" style="padding:0 16px" type="button" onclick="saveSftpSettings()">Simpan</button></div></div>
+</dialog>
 
 <!-- POPUP SEARCH/REPLACE -->
 <dialog id="popup-dialog" closedby="any" aria-labelledby="popup-title">
@@ -1040,6 +1161,7 @@ let activeQuery = ''; // query aktif untuk highlight, terpisah dari popup state
 let wordWrapOn = false;
 let isDirty = false;
 let lastSavedContent = '';
+let activeRemotePath = null; // jika tidak null, Save menulis ke server SFTP
 
 // ── SYNTAX HIGHLIGHTING ──
 function renderSyntaxHighlight(code) {
@@ -1660,6 +1782,13 @@ function loadFileContent(content, name) {
   scrollCont.scrollTop = 0;
 }
 
+// Kontrak JSON dari native (aman terhadap backtick/backslash/Unicode).
+window.__voidLoadFile = function (payload) {
+  activeRemotePath = payload.remotePath || null;
+  const displayName = activeRemotePath ? (payload.name || activeRemotePath.split('/').pop()) : payload.name;
+  loadFileContent(payload.content || '', displayName);
+};
+
 // ── SAVE FILE (helper — actually downloads) ──
 function performSave() {
   const name = fileNameInp.value.trim() || 'untitled.txt';
@@ -1877,6 +2006,382 @@ if ('launchQueue' in window) {
 // ── SERVICE WORKER REGISTRATION ──
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+/* ═══════════════ SFTP EXPLORER ═══════════════ */
+const bridge = window.AndroidBridge;
+const sftpPanel = document.getElementById('sftp-panel');
+const sftpConnectView = document.getElementById('sftp-connect-view');
+const sftpBrowser = document.getElementById('sftp-browser');
+const sftpListEl = document.getElementById('sftp-list');
+const sftpBreadcrumb = document.getElementById('sftp-breadcrumb');
+const sftpPathLabel = document.getElementById('sftp-path-label');
+const sftpServerLabel = document.getElementById('sftp-server-label');
+const sftpActionMenu = document.getElementById('sftp-action-menu');
+const sftpProgressEl = document.getElementById('sftp-progress');
+const sftpToastEl = document.getElementById('sftp-toast');
+
+let sftpConnected = false;
+let currentDir = '/';
+let selectedEntry = null;
+let pendingConnectConfig = null;    // dipakai saat konfirmasi host key
+let pendingCreateKind = null;       // 'file' | 'folder'
+const pendingRequests = new Map();  // requestId -> {resolve, reject}
+let requestSeq = 0;
+
+const settings = { sortAscending: true, showHidden: false, autoList: true };
+
+function hasBridge() { return !!(bridge && bridge.sftpConnect); }
+
+function sftpToast(message) {
+  sftpToastEl.textContent = message;
+  sftpToastEl.classList.add('visible');
+  clearTimeout(sftpToast._t);
+  sftpToast._t = setTimeout(() => sftpToastEl.classList.remove('visible'), 2600);
+}
+
+// Promise-based bridge call. requestId tetap untuk connect (save-remote khusus).
+function callBridge(fixedId, invoke) {
+  return new Promise((resolve, reject) => {
+    const requestId = fixedId || ('req-' + (++requestSeq) + '-' + Date.now());
+    pendingRequests.set(requestId, { resolve, reject });
+    try { invoke(requestId); }
+    catch (err) { pendingRequests.delete(requestId); reject(err); }
+  });
+}
+
+window.onSftpResult = function (payload) {
+  const pending = pendingRequests.get(payload.requestId);
+  if (!pending) return;
+  pendingRequests.delete(payload.requestId);
+  if (payload.success) pending.resolve(payload.data);
+  else pending.reject(new Error(payload.error || 'Operasi gagal'));
+};
+
+window.onSftpProgress = function (payload) {
+  sftpProgressEl.classList.add('visible');
+  sftpProgressEl.textContent = `Mengunggah ${payload.done}/${payload.total} — ${payload.label}`;
+  if (payload.done >= payload.total) setTimeout(() => sftpProgressEl.classList.remove('visible'), 1200);
+};
+
+function openSftpPanel() {
+  if (!hasBridge()) { sftpToast('SFTP hanya tersedia di aplikasi Android'); return; }
+  sftpPanel.classList.add('open');
+  loadSftpSettings();
+}
+function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); }
+
+function toggleSftpAuth() {
+  const mode = document.getElementById('sftp-auth').value;
+  document.getElementById('key-fields').classList.toggle('visible', mode === 'key');
+  document.getElementById('password-field').style.display = mode === 'key' ? 'none' : '';
+}
+
+function buildConnectConfig() {
+  const mode = document.getElementById('sftp-auth').value;
+  const config = {
+    host: document.getElementById('sftp-host').value.trim(),
+    port: parseInt(document.getElementById('sftp-port').value, 10) || 22,
+    username: document.getElementById('sftp-user').value.trim(),
+  };
+  if (mode === 'key') {
+    config.privateKeyPath = document.getElementById('sftp-key-path').value;
+    config.passphrase = document.getElementById('sftp-passphrase').value;
+    if (!config.privateKeyPath) throw new Error('Pilih private key terlebih dahulu');
+  } else {
+    config.password = document.getElementById('sftp-password').value;
+    if (!config.password) throw new Error('Password wajib diisi');
+  }
+  return config;
+}
+
+async function connectSftp(event) {
+  event.preventDefault();
+  const button = document.getElementById('sftp-connect-button');
+  try {
+    const config = buildConnectConfig();
+    pendingConnectConfig = config;
+    button.disabled = true; button.textContent = 'Menghubungkan…';
+    const data = await callBridge('conn-' + Date.now(), (id) => bridge.sftpConnect(id, JSON.stringify(config)));
+    handleConnectResult(data, config);
+  } catch (err) {
+    sftpToast(err.message);
+  } finally {
+    button.disabled = false; button.textContent = 'Hubungkan';
+  }
+}
+
+function handleConnectResult(data, config) {
+  if (data.status === 'hostKey') {
+    document.getElementById('sftp-fingerprint').textContent = data.fingerprint;
+    pendingConnectConfig = Object.assign({}, config, { fingerprint: data.fingerprint });
+    document.getElementById('sftp-hostkey-dialog').showModal();
+    return;
+  }
+  onConnected(config, data.home || '/');
+}
+
+async function trustHostKey() {
+  document.getElementById('sftp-hostkey-dialog').close();
+  if (!pendingConnectConfig) return;
+  try {
+    const config = pendingConnectConfig;
+    const data = await callBridge('conn-' + Date.now(), (id) => bridge.sftpTrustHostKey(id, JSON.stringify(config)));
+    if (data.status === 'connected') onConnected(config, data.home || '/');
+  } catch (err) { sftpToast(err.message); }
+}
+function rejectHostKey() { document.getElementById('sftp-hostkey-dialog').close(); pendingConnectConfig = null; sftpToast('Koneksi dibatalkan'); }
+
+function onConnected(config, home) {
+  sftpConnected = true;
+  sftpServerLabel.textContent = `${config.username}@${config.host}`;
+  sftpConnectView.style.display = 'none';
+  sftpBrowser.classList.add('visible');
+  navigateTo(home || '/');
+}
+
+async function disconnectSftp() {
+  try { await callBridge(null, (id) => bridge.sftpDisconnect(id)); } catch (_) {}
+  sftpConnected = false;
+  sftpBrowser.classList.remove('visible');
+  sftpConnectView.style.display = '';
+  sftpServerLabel.textContent = 'Belum terhubung';
+  sftpListEl.innerHTML = '';
+  closeSftpActions();
+}
+
+function navigateTo(path) {
+  currentDir = path || '/';
+  renderBreadcrumb();
+  sftpPathLabel.textContent = currentDir;
+  if (settings.autoList) listDir();
+  else renderRefreshPrompt();
+}
+
+function renderBreadcrumb() {
+  sftpBreadcrumb.innerHTML = '';
+  const parts = currentDir.split('/').filter(Boolean);
+  const root = document.createElement('button');
+  root.className = 'crumb'; root.textContent = '/';
+  root.onclick = () => navigateTo('/');
+  sftpBreadcrumb.appendChild(root);
+  let acc = '';
+  parts.forEach((part) => {
+    acc += '/' + part;
+    const target = acc;
+    const crumb = document.createElement('button');
+    crumb.className = 'crumb'; crumb.textContent = part;
+    crumb.onclick = () => navigateTo(target);
+    sftpBreadcrumb.appendChild(crumb);
+  });
+}
+
+function renderState(message) {
+  sftpListEl.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'state-box'; box.textContent = message;
+  sftpListEl.appendChild(box);
+}
+
+function renderRefreshPrompt() {
+  sftpListEl.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'state-box';
+  const label = document.createElement('div'); label.textContent = 'Refresh otomatis nonaktif.';
+  const btn = document.createElement('button'); btn.className = 'secondary-action'; btn.textContent = 'Muat direktori'; btn.onclick = listDir;
+  box.append(label, btn);
+  sftpListEl.appendChild(box);
+}
+
+async function listDir() {
+  renderState('Memuat…');
+  try {
+    const entries = await callBridge(null, (id) => bridge.sftpList(id, currentDir, settings.showHidden, settings.sortAscending));
+    renderEntries(entries || []);
+  } catch (err) { renderState('Gagal memuat: ' + err.message); }
+}
+function refreshSftp() { if (sftpConnected) listDir(); }
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return (bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + units[i];
+}
+
+function renderEntries(entries) {
+  sftpListEl.innerHTML = '';
+  if (!entries.length) { renderState('Folder kosong'); return; }
+  entries.forEach((entry) => {
+    const row = document.createElement('button');
+    row.type = 'button'; row.className = 'file-row'; row.setAttribute('role', 'listitem');
+    const icon = document.createElement('div'); icon.className = 'file-icon';
+    icon.textContent = entry.directory ? 'DIR' : (entry.name.split('.').pop().slice(0, 3).toUpperCase() || 'TXT');
+    const info = document.createElement('div'); info.className = 'file-info';
+    const name = document.createElement('span'); name.className = 'file-name'; name.textContent = entry.name; // textContent mencegah HTML injection
+    const meta = document.createElement('span'); meta.className = 'file-meta';
+    meta.textContent = entry.directory ? 'Folder' : `${formatBytes(entry.size)} · ${new Date(entry.modified).toLocaleDateString('id-ID')}`;
+    info.append(name, meta);
+    row.append(icon, info);
+    attachRowGestures(row, entry);
+    sftpListEl.appendChild(row);
+  });
+}
+
+// Tap = buka, long-press (500ms) = menu aksi. Dibatalkan saat scroll/gerak.
+function attachRowGestures(row, entry) {
+  let timer = null; let longPressed = false; let startY = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  row.addEventListener('pointerdown', (e) => {
+    longPressed = false; startY = e.clientY;
+    timer = setTimeout(() => { longPressed = true; openItemMenu(entry); }, 500);
+  });
+  row.addEventListener('pointermove', (e) => { if (Math.abs(e.clientY - startY) > 10) cancel(); });
+  row.addEventListener('pointerup', cancel);
+  row.addEventListener('pointercancel', cancel);
+  row.addEventListener('click', () => {
+    if (longPressed) { longPressed = false; return; }
+    if (entry.directory) navigateTo(entry.path);
+    else openRemoteFile(entry);
+  });
+}
+
+async function openRemoteFile(entry) {
+  sftpToast('Membuka ' + entry.name + '…');
+  try {
+    await callBridge(null, (id) => bridge.sftpOpenFile(id, entry.path));
+    closeSftpPanel();
+  } catch (err) { sftpToast(err.message); }
+}
+
+/* ── Menu tambah ── */
+function toggleSftpActions() { sftpActionMenu.classList.toggle('open'); }
+function closeSftpActions() { sftpActionMenu.classList.remove('open'); }
+
+function promptCreate(kind) {
+  closeSftpActions();
+  pendingCreateKind = kind;
+  selectedEntry = null;
+  document.getElementById('sftp-input-title').textContent = kind === 'folder' ? 'Folder baru' : 'File baru';
+  const input = document.getElementById('sftp-input-value');
+  input.value = '';
+  document.getElementById('sftp-input-dialog').showModal();
+  setTimeout(() => input.focus(), 50);
+}
+
+async function submitSftpInput(event) {
+  event.preventDefault();
+  const value = document.getElementById('sftp-input-value').value.trim();
+  if (!value) return;
+  if (value.includes('/') || value === '.' || value === '..') { sftpToast('Nama tidak valid'); return; }
+  document.getElementById('sftp-input-dialog').close();
+  try {
+    if (selectedEntry) {
+      await callBridge(null, (id) => bridge.sftpRename(id, currentDir, selectedEntry.name, value));
+      sftpToast('Nama diubah');
+    } else if (pendingCreateKind === 'folder') {
+      await callBridge(null, (id) => bridge.sftpCreateFolder(id, currentDir, value));
+      sftpToast('Folder dibuat');
+    } else {
+      await callBridge(null, (id) => bridge.sftpCreateFile(id, currentDir, value));
+      sftpToast('File dibuat');
+    }
+    listDir();
+  } catch (err) { sftpToast(err.message); }
+  selectedEntry = null;
+}
+
+function uploadSftpFile() {
+  closeSftpActions();
+  callBridge(null, (id) => bridge.sftpUpload(id, currentDir))
+    .then(() => { sftpToast('File diunggah'); listDir(); })
+    .catch((err) => sftpToast(err.message));
+}
+
+function importSftpZip() {
+  closeSftpActions();
+  callBridge(null, (id) => bridge.sftpImportZip(id, currentDir))
+    .then(() => { sftpToast('ZIP diimpor'); listDir(); })
+    .catch((err) => sftpToast(err.message));
+}
+
+/* ── Aksi per item ── */
+function openItemMenu(entry) {
+  selectedEntry = entry;
+  document.getElementById('sftp-item-title').textContent = entry.name;
+  document.getElementById('sftp-item-path').textContent = entry.path;
+  document.getElementById('sftp-item-dialog').showModal();
+}
+
+function renameSelectedItem() {
+  document.getElementById('sftp-item-dialog').close();
+  if (!selectedEntry) return;
+  pendingCreateKind = null;
+  document.getElementById('sftp-input-title').textContent = 'Ubah nama';
+  const input = document.getElementById('sftp-input-value');
+  input.value = selectedEntry.name;
+  document.getElementById('sftp-input-dialog').showModal();
+  setTimeout(() => input.focus(), 50);
+}
+
+async function deleteSelectedItem() {
+  document.getElementById('sftp-item-dialog').close();
+  if (!selectedEntry) return;
+  const entry = selectedEntry;
+  const ok = await showConfirm(
+    `Hapus "${entry.name}"${entry.directory ? ' beserta seluruh isinya' : ''}?`, 'Hapus', 'Batal'
+  );
+  if (ok !== 'ok') return;
+  try {
+    await callBridge(null, (id) => bridge.sftpDelete(id, entry.path));
+    sftpToast('Terhapus');
+    if (activeRemotePath === entry.path) activeRemotePath = null;
+    listDir();
+  } catch (err) { sftpToast(err.message); }
+  selectedEntry = null;
+}
+
+function copySelectedUri() {
+  document.getElementById('sftp-item-dialog').close();
+  if (!selectedEntry) return;
+  const label = sftpServerLabel.textContent;
+  const uri = `sftp://${label}${selectedEntry.path}`;
+  if (navigator.clipboard) navigator.clipboard.writeText(uri).then(() => sftpToast('URI disalin')).catch(() => sftpToast(uri));
+  else sftpToast(uri);
+  selectedEntry = null;
+}
+
+function pickSftpKey() {
+  callBridge(null, (id) => bridge.sftpPickPrivateKey(id))
+    .then((data) => {
+      document.getElementById('sftp-key-path').value = data.path;
+      document.getElementById('sftp-key-button').textContent = data.name || 'Key dipilih';
+    })
+    .catch((err) => sftpToast(err.message));
+}
+
+/* ── Pengaturan ── */
+function loadSftpSettings() {
+  if (bridge && bridge.loadSettings) {
+    try {
+      const saved = JSON.parse(bridge.loadSettings());
+      Object.assign(settings, saved);
+    } catch (_) {}
+  }
+}
+function openSftpSettings() {
+  document.getElementById('setting-sort').checked = settings.sortAscending;
+  document.getElementById('setting-hidden').checked = settings.showHidden;
+  document.getElementById('setting-autolist').checked = settings.autoList;
+  document.getElementById('sftp-settings-dialog').showModal();
+}
+function saveSftpSettings() {
+  settings.sortAscending = document.getElementById('setting-sort').checked;
+  settings.showHidden = document.getElementById('setting-hidden').checked;
+  settings.autoList = document.getElementById('setting-autolist').checked;
+  if (bridge && bridge.saveSettings) bridge.saveSettings(JSON.stringify(settings));
+  document.getElementById('sftp-settings-dialog').close();
+  if (sftpConnected) navigateTo(currentDir);
 }
 </script>
 </body>

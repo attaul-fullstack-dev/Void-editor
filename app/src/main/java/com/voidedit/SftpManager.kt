@@ -53,7 +53,7 @@ class SftpManager {
         client.setConnectTimeout(15_000)
         client.setTimeout(30_000)
         var observed: String? = null
-        client.addHostKeyVerifier { _, _, key ->
+        client.addHostKeyVerifier { _: String, _: Int, key: PublicKey ->
             val fingerprint = fingerprint(key)
             observed = fingerprint
             config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint)

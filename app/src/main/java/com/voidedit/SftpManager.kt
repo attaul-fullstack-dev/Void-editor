@@ -53,11 +53,13 @@ class SftpManager {
         client.setConnectTimeout(15_000)
         client.setTimeout(30_000)
         var observed: String? = null
-        client.addHostKeyVerifier { _: String, _: Int, key: PublicKey ->
-            val fingerprint = fingerprint(key)
-            observed = fingerprint
-            config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint)
-        }
+        client.addHostKeyVerifier(object : net.schmizz.sshj.transport.verification.HostKeyVerifier {
+    override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
+        val fingerprint = fingerprint(key)
+        observed = fingerprint
+        return config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint)
+    }
+})
         try {
             client.connect(config.host, config.port)
         } catch (error: Exception) {

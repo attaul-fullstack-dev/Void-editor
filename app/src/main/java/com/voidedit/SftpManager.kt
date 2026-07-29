@@ -107,6 +107,8 @@ class SftpManager {
     }
 
     fun list(path: String, showHidden: Boolean, sortAscending: Boolean): List<Entry> = withClient { client ->
+        // Folder selalu di atas; nama diurutkan A–Z atau Z–A sesuai preferensi user.
+        val nameOrder: Comparator<String> = if (sortAscending) naturalOrder() else reverseOrder()
         client.ls(normalize(path)).asSequence()
             .filter { it.name != "." && it.name != ".." }
             .filter { showHidden || !it.name.startsWith(".") }
@@ -118,12 +120,11 @@ class SftpManager {
                     directory = attrs.type == FileMode.Type.DIRECTORY,
                     size = attrs.size,
                     modified = attrs.mtime * 1000L,
-                    permissions = attrs.permissions.joinToString("") { permission -> permission.name }
+                    permissions = formatPermissions(attrs.mode.permissionsMask)
                 )
             }
-            .sortedWith(compareBy<Entry> { !it.directory }.thenBy { if (sortAscending) it.name.lowercase() else "" })
+            .sortedWith(compareBy<Entry> { !it.directory }.thenBy(nameOrder) { it.name.lowercase() })
             .toList()
-            .let { if (sortAscending) it else it.groupBy { entry -> entry.directory }.values.flatMap { group -> group.sortedByDescending { entry -> entry.name.lowercase() } } }
     }
 
     fun read(path: String, maxBytes: Long = 2L * 1024 * 1024): String = withClient { client ->
@@ -133,6 +134,14 @@ class SftpManager {
         val bytes = client.open(safePath).use { remote -> remote.RemoteFileInputStream().use { it.readBytes() } }
         require(bytes.none { it == 0.toByte() }) { "File biner tidak dapat dibuka di editor teks" }
         bytes.toString(Charsets.UTF_8)
+    }
+
+    /** Baca file sebagai byte mentah (dipakai auto-viewer gambar, Fitur D.1). */
+    fun readBytes(path: String, maxBytes: Long = 8L * 1024 * 1024): ByteArray = withClient { client ->
+        val safePath = normalize(path)
+        val attrs = client.stat(safePath)
+        require(attrs.size <= maxBytes) { "File terlalu besar untuk ditampilkan (maksimum 8 MB)" }
+        client.open(safePath).use { remote -> remote.RemoteFileInputStream().use { it.readBytes() } }
     }
 
     fun write(path: String, content: String) = withClient { client ->
@@ -188,13 +197,25 @@ class SftpManager {
     }
 
     companion object {
+        /**
+         * Ubah 9 bit izin POSIX menjadi "rwxr-xr-x". Sebelumnya nama enum yang dipakai,
+         * sehingga kolom izin di UI tampil seperti "USR_RUSR_W…".
+         */
+        fun formatPermissions(mask: Int): String {
+            val symbols = charArrayOf('r', 'w', 'x')
+            return (0 until 9).joinToString("") { index ->
+                if (mask and (1 shl (8 - index)) != 0) symbols[index % 3].toString() else "-"
+            }
+        }
+
         fun normalize(raw: String): String {
             val absolute = raw.startsWith('/')
             val parts = raw.replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }
             val clean = mutableListOf<String>()
             parts.forEach { part -> if (part == "..") { if (clean.isNotEmpty()) clean.removeAt(clean.lastIndex) } else clean += part }
             val result = clean.joinToString("/")
-            return if (absolute) "/$result".ifEmpty { "/" } else result.ifEmpty { "." }
+            // "/$result" tidak mungkin kosong, jadi ifEmpty di sini dulunya kode mati.
+            return if (absolute) "/$result" else result.ifEmpty { "." }
         }
 
         fun join(parent: String, child: String): String = normalize("${parent.trimEnd('/')}/$child")

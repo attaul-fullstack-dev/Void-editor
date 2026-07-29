@@ -54,6 +54,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.9.0")
+    // Fitur A: password koneksi SFTP disimpan terenkripsi (AES-256 + Android Keystore).
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.hierynomus:sshj:0.38.0") {
         exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
         exclude(group = "org.bouncycastle", module = "bcprov-jdk18on")

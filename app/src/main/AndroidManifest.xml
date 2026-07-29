@@ -59,6 +59,20 @@
                 <data android:scheme="content" android:mimeType="application/json" />
             </intent-filter>
 
+            <!-- Buka dengan: Markdown (punya tombol Preview, Fitur D.3) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="text/markdown" />
+            </intent-filter>
+
+            <!-- Buka dengan: gambar → langsung viewer, tanpa mode edit teks (Fitur D.1) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="image/*" />
+            </intent-filter>
+
             <!-- Buka dengan: file:// scheme (file manager lama) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

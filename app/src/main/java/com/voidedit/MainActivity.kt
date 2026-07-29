@@ -24,6 +24,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.zip.ZipInputStream
+import java.security.Security
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 
 class MainActivity : AppCompatActivity() {
 
@@ -89,8 +91,12 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        supportActionBar?.hide()
+    super.onCreate(savedInstanceState)
+
+    Security.removeProvider("BC")
+    Security.insertProviderAt(BouncyCastleProvider(), 1)
+
+    supportActionBar?.hide()
 
         webView = WebView(this)
         setContentView(webView)

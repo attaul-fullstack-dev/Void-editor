@@ -64,7 +64,7 @@ class SftpManager {
             runCatching { client.close() }
             if (observed != null && config.trustedFingerprint == null) {
                 pendingFingerprint = observed
-                return HostKeyRequired(observed!!)
+                return ConnectResult.HostKeyRequired(observed!!)
             }
             if (observed != null && config.trustedFingerprint != null) {
                 throw SecurityException("Fingerprint host berubah. Koneksi ditolak.", error)
@@ -92,7 +92,7 @@ class SftpManager {
             ssh = client
             sftp = channel
             pendingFingerprint = null
-            Connected(channel.canonicalize("."))
+            ConnectResult.Connected(channel.canonicalize("."))
         } catch (error: Exception) {
             runCatching { client.disconnect() }
             runCatching { client.close() }

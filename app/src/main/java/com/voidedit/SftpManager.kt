@@ -59,6 +59,10 @@ class SftpManager {
         observed = fingerprint
         return config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint)
     }
+
+    override fun findExistingAlgorithms(hostname: String, port: Int): List<String> {
+        return emptyList()
+    }
 })
         try {
             client.connect(config.host, config.port)

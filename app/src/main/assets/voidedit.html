@@ -153,6 +153,13 @@
       <button class="icon-btn" type="button" onclick="refreshLocal()" aria-label="Refresh">↻</button>
     </div>
     <div id="local-list" role="list"></div>
+    <div id="local-action-menu">
+      <button class="menu-action" onclick="promptCreate('file')">File baru</button>
+      <button class="menu-action" onclick="promptCreate('folder')">Folder baru</button>
+      <button class="menu-action" onclick="uploadLocalFile()">Upload file</button>
+      <button class="menu-action" onclick="importLocalZip()">Import ZIP</button>
+    </div>
+    <button id="local-fab" type="button" onclick="toggleLocalActions()" aria-label="Tambah">+</button>
   </div>
 
   <div id="sftp-browser">
@@ -208,7 +215,7 @@
   </div>
   <!-- allow-scripts tanpa allow-same-origin: script halaman jalan, tapi origin opaque
        sehingga preview tidak bisa menyentuh DOM/localStorage editor. -->
-  <iframe id="preview-frame" title="Preview" sandbox="allow-scripts"></iframe>
+  <iframe id="preview-frame" title="Preview" sandbox="allow-scripts allow-forms allow-modals"></iframe>
 </section>
 
 <!-- AUTO-VIEWER GAMBAR (Fitur D.1) -->

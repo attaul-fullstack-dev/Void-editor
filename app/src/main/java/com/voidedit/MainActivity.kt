@@ -313,6 +313,52 @@ class MainActivity : AppCompatActivity() {
         return array
     }
 
+    private fun validateDocumentName(name: String) {
+        require(name.isNotBlank() && name != "." && name != ".." && !name.contains('/')) { "Nama tidak valid" }
+    }
+
+    private fun createDocument(parent: Uri, name: String, directory: Boolean): Uri {
+        validateDocumentName(name)
+        val mime = if (directory) DocumentsContract.Document.MIME_TYPE_DIR else "text/plain"
+        return DocumentsContract.createDocument(contentResolver, parent, mime, name)
+            ?: error("Item tidak dapat dibuat")
+    }
+
+    private fun copyUriToFolder(source: Uri, parent: Uri): Uri {
+        val name = getFileName(source)
+        validateDocumentName(name)
+        val mime = contentResolver.getType(source) ?: "application/octet-stream"
+        val target = DocumentsContract.createDocument(contentResolver, parent, mime, name)
+            ?: error("File tidak dapat dibuat")
+        try {
+            contentResolver.openInputStream(source)?.use { input ->
+                contentResolver.openOutputStream(target, "w")?.use { output -> input.copyTo(output) }
+                    ?: error("File tujuan tidak dapat ditulis")
+            } ?: error("File sumber tidak dapat dibaca")
+        } catch (error: Exception) {
+            runCatching { DocumentsContract.deleteDocument(contentResolver, target) }
+            throw error
+        }
+        return target
+    }
+
+    private fun copyFileTreeToSaf(source: File, parent: Uri) {
+        source.listFiles()?.sortedBy { it.name.lowercase() }?.forEach { child ->
+            validateDocumentName(child.name)
+            if (child.isDirectory) {
+                val directory = createDocument(parent, child.name, true)
+                copyFileTreeToSaf(child, directory)
+            } else {
+                val target = DocumentsContract.createDocument(
+                    contentResolver, parent, "application/octet-stream", child.name
+                ) ?: error("Gagal membuat ${child.name}")
+                contentResolver.openOutputStream(target, "w")?.use { output ->
+                    child.inputStream().use { input -> input.copyTo(output) }
+                } ?: error("Gagal menulis ${child.name}")
+            }
+        }
+    }
+
     // Kirim konten file ke editor via JSON agar aman terhadap backtick/backslash/Unicode.
     private fun dispatchLoad(content: String, name: String, remotePath: String?) {
         val payload = JSONObject()
@@ -912,6 +958,86 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun localList(requestId: String, uri: String, showHidden: Boolean) {
             runTask(requestId, "localList") { listTree(uri, showHidden) }
+        }
+
+        @JavascriptInterface
+        fun localCreate(requestId: String, parentUri: String, name: String, directory: Boolean) {
+            runTask(requestId, "localCreate") {
+                val uri = createDocument(Uri.parse(parentUri), name.trim(), directory)
+                JSONObject().put("uri", uri.toString())
+            }
+        }
+
+        @JavascriptInterface
+        fun localRename(requestId: String, uriString: String, newName: String) {
+            runTask(requestId, "localRename") {
+                validateDocumentName(newName.trim())
+                val renamed = DocumentsContract.renameDocument(contentResolver, Uri.parse(uriString), newName.trim())
+                    ?: error("Item tidak dapat diubah namanya")
+                JSONObject().put("uri", renamed.toString())
+            }
+        }
+
+        @JavascriptInterface
+        fun localDelete(requestId: String, uriString: String) {
+            runTask(requestId, "localDelete") {
+                val uri = Uri.parse(uriString)
+                check(DocumentsContract.deleteDocument(contentResolver, uri)) { "Item tidak dapat dihapus" }
+                if (currentFileUri == uri) runOnUiThread { currentFileUri = null }
+                JSONObject().put("uri", uriString)
+            }
+        }
+
+        @JavascriptInterface
+        fun localUpload(requestId: String, parentUri: String) {
+            runOnUiThread {
+                pickCallback = { source ->
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching { copyUriToFolder(source, Uri.parse(parentUri)) }
+                        }
+                        result.fold(
+                            onSuccess = { emitResult(requestId, "localUpload", true, JSONObject().put("uri", it.toString()), null) },
+                            onFailure = { emitResult(requestId, "localUpload", false, null, it.message ?: "Upload gagal") }
+                        )
+                    }
+                }
+                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                })
+            }
+        }
+
+        @JavascriptInterface
+        fun localImportZip(requestId: String, parentUri: String) {
+            runOnUiThread {
+                pickCallback = { source ->
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val workDir = File(cacheDir, "local_zip_${System.currentTimeMillis()}")
+                                workDir.mkdirs()
+                                try {
+                                    extractZip(source, workDir)
+                                    copyFileTreeToSaf(workDir, Uri.parse(parentUri))
+                                } finally {
+                                    workDir.deleteRecursively()
+                                }
+                                JSONObject().put("uri", parentUri)
+                            }
+                        }
+                        result.fold(
+                            onSuccess = { emitResult(requestId, "localImportZip", true, it, null) },
+                            onFailure = { emitResult(requestId, "localImportZip", false, null, it.message ?: "Import ZIP gagal") }
+                        )
+                    }
+                }
+                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/zip"
+                })
+            }
         }
 
         /** Buka file lokal dari folder bookmark: teks ke editor, gambar ke viewer. */

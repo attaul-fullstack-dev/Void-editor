@@ -893,9 +893,9 @@
   .file-name { display: block; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-meta { display: block; color: var(--text-muted); font-size: 11px; margin-top: 5px; }
   .state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); text-align: center; padding: 24px; line-height: 1.5; }
-  #sftp-fab { position: absolute; right: 18px; bottom: 20px; width: 52px; height: 52px; border: 0; border-radius: 16px; background: var(--teal); color: var(--bg-base); font-size: 28px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; }
-  #sftp-action-menu { position: absolute; right: 18px; bottom: 80px; display: none; width: 190px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
-  #sftp-action-menu.open { display: flex; flex-direction: column; }
+  #sftp-fab, #local-fab { position: absolute; right: 18px; bottom: 20px; width: 52px; height: 52px; border: 0; border-radius: 16px; background: var(--teal); color: var(--bg-base); font-size: 28px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; }
+  #sftp-action-menu, #local-action-menu { position: absolute; z-index: 3; right: 18px; bottom: 80px; display: none; width: 190px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-surface); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+  #sftp-action-menu.open, #local-action-menu.open { display: flex; flex-direction: column; }
   .menu-action { border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 11px; border-radius: 8px; font-size: 14px; cursor: pointer; }
   .menu-action:active { background: var(--bg-elevated); }
   #sftp-progress { display: none; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }

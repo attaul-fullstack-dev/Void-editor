@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -46,6 +47,10 @@ class MainActivity : AppCompatActivity() {
     // Remote path yang sedang dibuka. Jika tidak null, tombol Save menulis ke server.
     private var activeRemotePath: String? = null
 
+    // True hanya selama penulisan berjalan (bukan saat dialog "Simpan sebagai" terbuka),
+    // supaya dua permintaan Save beruntun tidak menulis file yang sama bersamaan.
+    private var isWriting = false
+
     // Launcher pemilihan file yang menyalurkan hasil ke handler dinamis.
     private var pickCallback: ((Uri) -> Unit)? = null
 
@@ -71,19 +76,22 @@ class MainActivity : AppCompatActivity() {
     private val saveAsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
-                } catch (_: Exception) {}
-                currentFileUri = uri
-                pendingWriteContent?.let { writeToUri(uri, it) }
-                pendingWriteContent = null
-            }
+        val content = pendingWriteContent
+        pendingWriteContent = null
+        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        if (uri == null || content == null) {
+            // Dibatalkan user: tetap laporkan supaya editor tidak menandai file sudah bersih.
+            emitResult(SAVE_REQUEST_ID, "save", false, null, "Penyimpanan dibatalkan")
+            return@registerForActivityResult
         }
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
+        currentFileUri = uri
+        writeToUri(uri, content)
     }
 
     private val pickFileLauncher = registerForActivityResult(
@@ -141,6 +149,19 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
+            // WebView membatasi teks minimum 8px secara default (minimumFontSize /
+            // minimumLogicalFontSize), sehingga opsi ukuran font 6px & 4px akan diabaikan.
+            // Turunkan batasnya agar seluruh opsi di dropdown benar-benar berlaku.
+            minimumFontSize = 1
+            minimumLogicalFontSize = 1
+            textZoom = 100
+            // TEXT_AUTOSIZING (default di banyak WebView) MEMBESARKAN teks kecil secara
+            // otomatis, sehingga 4px/6px tetap terlihat sama besar walau minimumFontSize
+            // sudah 1. NORMAL mematikan penyesuaian itu agar ukuran font persis seperti CSS.
+            layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
+            // Font monospace editor tidak boleh ikut skala "ukuran font" sistem.
+            defaultFontSize = 16
+            defaultFixedFontSize = 13
         }
 
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
@@ -156,6 +177,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        onBackPressedDispatcher.addCallback(this, backCallback)
+
         webView.loadUrl("file:///android_asset/voidedit.html")
         handleIncomingIntent(intent)
     }
@@ -166,6 +189,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Sesi hanya diputus saat Activity benar-benar mati. Selama app masih berjalan
+        // (pindah layar Explorer, buka file, background singkat) koneksi dibiarkan hidup —
+        // SftpManager juga memulihkan sesi otomatis bila server memutus koneksi idle.
         scope.cancel()
         runCatching { sftp.disconnect() }
         super.onDestroy()
@@ -244,7 +270,12 @@ class MainActivity : AppCompatActivity() {
         else DocumentsContract.getTreeDocumentId(uri)
 
     // Listing folder SAF lewat DocumentsContract (content URI, bukan java.io.File).
-    private fun listTree(uriString: String): JSONArray {
+    // Filter "berkas tersembunyi" membaca SharedPreferences yang SAMA dengan listing SFTP
+    // (satu sumber kebenaran), sehingga toggle di Pengaturan berlaku konsisten di semua listing.
+    private fun listTree(uriString: String, showHiddenOverride: Boolean? = null): JSONArray {
+        // Satu sumber kebenaran: nilai dari WebView bila dikirim, kalau tidak baca
+        // SharedPreferences yang sama dengan listing SFTP.
+        val showHidden = showHiddenOverride ?: prefs.getBoolean("showHidden", false)
         val uri = Uri.parse(uriString)
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, documentIdOf(uri))
         val rows = mutableListOf<JSONObject>()
@@ -259,6 +290,7 @@ class MainActivity : AppCompatActivity() {
             while (cursor.moveToNext()) {
                 val docId = cursor.getString(0) ?: continue
                 val name = cursor.getString(1) ?: docId.substringAfterLast('/')
+                if (!showHidden && name.startsWith(".")) continue
                 val mime = cursor.getString(2) ?: ""
                 val directory = mime == DocumentsContract.Document.MIME_TYPE_DIR
                 rows += JSONObject()
@@ -270,8 +302,11 @@ class MainActivity : AppCompatActivity() {
                     .put("mime", mime)
             }
         } ?: error("Folder tidak dapat dibaca. Tambahkan ulang jalur ini.")
+        val ascending = prefs.getBoolean("sortAscending", true)
+        val nameOrder: Comparator<String> = if (ascending) naturalOrder() else reverseOrder()
         val sorted = rows.sortedWith(
-            compareBy<JSONObject>({ !it.optBoolean("directory") }, { it.optString("name").lowercase() })
+            compareBy<JSONObject> { !it.optBoolean("directory") }
+                .thenBy(nameOrder) { it.optString("name").lowercase() }
         )
         val array = JSONArray()
         sorted.forEach { array.put(it) }
@@ -320,15 +355,60 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeToUri(uri: Uri, content: String) {
-        try {
-            contentResolver.openOutputStream(uri, "wt")?.use {
-                it.write(content.toByteArray(Charsets.UTF_8))
-            }
-            toast("✓ Tersimpan")
-        } catch (e: Exception) {
-            toast("Gagal simpan: ${e.message}")
+    /**
+     * Tulis ke content URI. Melempar bila gagal — pemanggil wajib melaporkan hasilnya.
+     * Mode "wt" (truncate) tidak didukung semua DocumentsProvider, jadi ada fallback "w"
+     * yang memotong sisa file lama secara manual agar file tidak berisi ekor konten lama.
+     */
+    private fun writeUriOrThrow(uri: Uri, content: String) {
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        val written = runCatching {
+            contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) } ?: error("Stream tulis tidak tersedia")
         }
+        if (written.isSuccess) return
+        contentResolver.openFileDescriptor(uri, "rwt")?.use { descriptor ->
+            java.io.FileOutputStream(descriptor.fileDescriptor).use { stream ->
+                stream.channel.truncate(0)
+                stream.write(bytes)
+                stream.flush()
+            }
+        } ?: throw (written.exceptionOrNull() ?: IllegalStateException("File tidak dapat ditulis"))
+    }
+
+    /**
+     * "Simpan sebagai". Bila pemilih berkas sistem tidak dapat dibuka (mis. tidak ada
+     * DocumentsUI di ROM), kegagalan WAJIB dilaporkan — kalau tidak, Promise Save di
+     * WebView menggantung selamanya dan alur "keluar setelah simpan" ikut macet.
+     */
+    private fun launchSaveAs(content: String, fileName: String) {
+        pendingWriteContent = content
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+        }
+        val launched = runCatching { saveAsLauncher.launch(intent) }
+        if (launched.isFailure) {
+            pendingWriteContent = null
+            val message = launched.exceptionOrNull()?.message ?: "Pemilih berkas tidak tersedia"
+            toast("Gagal simpan: $message")
+            emitResult(SAVE_REQUEST_ID, "save", false, null, message)
+        }
+    }
+
+    private fun writeToUri(uri: Uri, content: String) {
+        val result = runCatching { writeUriOrThrow(uri, content) }
+        result.fold(
+            onSuccess = {
+                toast("✓ Tersimpan")
+                emitResult(SAVE_REQUEST_ID, "save", true, JSONObject().put("target", "local"), null)
+            },
+            onFailure = {
+                val message = it.message ?: "File tidak dapat ditulis"
+                toast("Gagal simpan: $message")
+                emitResult(SAVE_REQUEST_ID, "save", false, null, message)
+            }
+        )
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
@@ -439,27 +519,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class AndroidBridge {
+        /**
+         * Satu-satunya jalur Save. Hasilnya SELALU dilaporkan ke WebView lewat requestId
+         * tetap SAVE_REQUEST_ID + Toast native, baik untuk SFTP, file lokal, maupun
+         * "Simpan sebagai" — tidak ada lagi kegagalan yang hilang tanpa jejak.
+         */
         @JavascriptInterface
         fun onSaveRequest(content: String, fileName: String) {
             runOnUiThread {
+                if (isWriting) {
+                    emitResult(SAVE_REQUEST_ID, "save", false, null, "Penyimpanan sebelumnya masih berjalan")
+                    return@runOnUiThread
+                }
                 val remote = activeRemotePath
                 if (remote != null) {
-                    runSftp("save-remote", "write") {
-                        sftp.write(remote, content); JSONObject().put("path", remote)
+                    isWriting = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) { runCatching { sftp.write(remote, content) } }
+                        isWriting = false
+                        result.fold(
+                            onSuccess = {
+                                toast("✓ Tersimpan ke server")
+                                emitResult(SAVE_REQUEST_ID, "save", true, JSONObject().put("target", "remote").put("path", remote), null)
+                            },
+                            onFailure = {
+                                val message = it.message ?: "Gagal menulis ke server"
+                                toast("Gagal simpan ke server: $message")
+                                emitResult(SAVE_REQUEST_ID, "save", false, null, message)
+                            }
+                        )
                     }
                     return@runOnUiThread
                 }
+
                 val uri = currentFileUri
-                if (uri != null) writeToUri(uri, content)
-                else {
-                    pendingWriteContent = content
-                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TITLE, fileName)
+                if (uri != null) {
+                    isWriting = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) { runCatching { writeUriOrThrow(uri, content) } }
+                        isWriting = false
+                        result.fold(
+                            onSuccess = {
+                                toast("✓ Tersimpan")
+                                emitResult(SAVE_REQUEST_ID, "save", true, JSONObject().put("target", "local").put("name", fileName), null)
+                            },
+                            onFailure = {
+                                // Izin SAF bisa hilang setelah restart / file dipindah: jangan
+                                // gagal diam-diam, tawarkan "Simpan sebagai" sebagai jalan keluar.
+                                toast("Gagal simpan: ${it.message}. Pilih lokasi baru.")
+                                currentFileUri = null
+                                launchSaveAs(content, fileName)
+                            }
+                        )
                     }
-                    saveAsLauncher.launch(intent)
+                    return@runOnUiThread
                 }
+
+                launchSaveAs(content, fileName)
             }
         }
 
@@ -788,9 +904,14 @@ class MainActivity : AppCompatActivity() {
             bookmarkStore.delete(id); JSONObject().put("id", id)
         }
 
+        /**
+         * Listing folder bookmark lokal. showHidden dikirim eksplisit oleh WebView (nilai
+         * yang sama yang dipakai sftpList) sehingga toggle "tampilkan berkas tersembunyi"
+         * langsung berlaku di folder SAF, bukan hanya di SFTP.
+         */
         @JavascriptInterface
-        fun localList(requestId: String, uri: String) {
-            runTask(requestId, "localList") { listTree(uri) }
+        fun localList(requestId: String, uri: String, showHidden: Boolean) {
+            runTask(requestId, "localList") { listTree(uri, showHidden) }
         }
 
         /** Buka file lokal dari folder bookmark: teks ke editor, gambar ke viewer. */
@@ -894,24 +1015,51 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico")
+
+        /** requestId tetap untuk hasil Save — WebView mendaftarkan handler dengan id ini. */
+        const val SAVE_REQUEST_ID = "save-file"
     }
 
     /**
-     * WebView ini SPA satu halaman, jadi canGoBack() bukan indikator yang benar: tombol Back
-     * dulu langsung menutup aplikasi dan mengabaikan dialog/overlay/panel yang terbuka.
-     * Sekarang UI web diberi kesempatan menangani Back lebih dulu lewat __voidHandleBack().
+     * WebView ini SPA satu halaman, jadi canGoBack() bukan indikator yang benar. Back
+     * ditangani lewat OnBackPressedDispatcher (bukan override onBackPressed yang sudah
+     * deprecated dan TIDAK dipanggil lagi saat predictive back aktif — itu membuat Back
+     * langsung menutup Activity sehingga sesi SFTP terbuang dan user harus reconnect).
+     *
+     * UI web selalu mendapat kesempatan pertama: menutup dialog/overlay, atau naik satu
+     * level folder di explorer memakai koneksi yang masih terbuka.
      */
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (!isWebViewReady) {
-            super.onBackPressed()
-            return
+    private val backCallback = object : androidx.activity.OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (!isWebViewReady) {
+                finishFromBack()
+                return
+            }
+            // Satu penekanan Back = tepat satu keputusan. Kalau callback JS tidak pernah
+            // datang (WebView sibuk/crash renderer), watchdog memastikan Back tidak "mati"
+            // dan aplikasi tetap bisa ditutup.
+            var decided = false
+            val decide = { handled: Boolean ->
+                if (!decided) {
+                    decided = true
+                    if (!handled) finishFromBack()
+                }
+            }
+            val watchdog = Runnable { decide(false) }
+            webView.postDelayed(watchdog, 600L)
+            webView.evaluateJavascript(
+                "(function(){ try { return !!(window.__voidHandleBack && window.__voidHandleBack()); } catch (e) { return false; } })()"
+            ) { handled ->
+                webView.removeCallbacks(watchdog)
+                // Belum ditangani web (tidak ada dialog/panel/riwayat folder) → tutup activity.
+                decide(handled == "true")
+            }
         }
-        webView.evaluateJavascript(
-            "(function(){ try { return !!(window.__voidHandleBack && window.__voidHandleBack()); } catch (e) { return false; } })()"
-        ) { handled ->
-            // Belum ditangani web (tidak ada dialog/panel terbuka) → tutup activity.
-            if (handled != "true") finish()
-        }
+    }
+
+    /** Keluar via Back: sesi SFTP baru diputus di onDestroy, bukan di sini. */
+    private fun finishFromBack() {
+        backCallback.isEnabled = false
+        finish()
     }
 }

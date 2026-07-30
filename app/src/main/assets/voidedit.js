@@ -84,7 +84,8 @@ function toggleWordWrap() {
   syntaxLayer.classList.toggle('word-wrap', wordWrapOn);
   hlLayer.classList.toggle('word-wrap', wordWrapOn);
   btnWordWrap.classList.toggle('active', wordWrapOn);
-  wrapLabel.textContent = wordWrapOn ? 'Wrap' : 'Wrap';
+  btnWordWrap.setAttribute('aria-pressed', String(wordWrapOn));
+  wrapLabel.textContent = 'Wrap';
   localStorage.setItem('voidedit-wordwrap', wordWrapOn ? '1' : '0');
   
   // Sembunyikan gutter (nomor baris) saat word wrap aktif
@@ -96,7 +97,7 @@ function toggleWordWrap() {
     gutter.style.display = 'block';
   }
 
-  resizeTextarea();
+  remeasureEditor();
   fullUpdate();
 }
 
@@ -111,7 +112,7 @@ function changeFontSize(size) {
   document.documentElement.style.setProperty('--editor-line-height', lineH + 'px');
   fontSizeSelect.value = px;
   localStorage.setItem('voidedit-fontsize', px);
-  resizeTextarea();
+  remeasureEditor();
   fullUpdate();
 }
 
@@ -209,43 +210,39 @@ scrollCont.addEventListener('scroll', () => {
 }, { passive: true });
 
 // ── TEXTAREA SIZING ──
-// Textarea harus mengisi scroll-inner
+// Textarea harus mengisi scroll-inner. Semua layer di-reset sebelum pengukuran agar
+// ukuran font/wrap lama tidak meninggalkan kanvas tinggi atau lebar di belakang teks.
 function resizeTextarea() {
-  if (wordWrapOn) {
-    // Word wrap ON → width tetap 100%, biarkan teks turun ke bawah
-    const containerW = scrollCont.clientWidth;
-    scrollInner.style.width = containerW + 'px';
-    textarea.style.width = containerW + 'px';
-    syntaxLayer.style.width = containerW + 'px';
-    hlLayer.style.width = containerW + 'px';
-    
-    // Reset tinggi sementara agar bisa menyusut
-    textarea.style.height = '0px';
-    
-    // Hitung tinggi setelah wrap
-    const minH = textarea.scrollHeight;
-    scrollInner.style.height = Math.max(minH, scrollCont.clientHeight) + 'px';
-    textarea.style.height = scrollInner.style.height;
-    syntaxLayer.style.height = scrollInner.style.height;
-    hlLayer.style.height = scrollInner.style.height;
-  } else {
-    // Word wrap OFF → reset height saja agar scrollHeight akurat
-    textarea.style.height = '0px';
-    // Tetap 100% agar tidak ter-wrap paksa oleh bug browser mobile pada elemen 0px
-    textarea.style.width = '100%';
-    
-    const minH = textarea.scrollHeight;
-    const minW = textarea.scrollWidth;
-    
-    scrollInner.style.height = Math.max(minH, scrollCont.clientHeight) + 'px';
-    scrollInner.style.width  = Math.max(minW, scrollCont.clientWidth)  + 'px';
-    textarea.style.width  = scrollInner.style.width;
-    textarea.style.height = scrollInner.style.height;
-    syntaxLayer.style.width  = scrollInner.style.width;
-    syntaxLayer.style.height = scrollInner.style.height;
-    hlLayer.style.width  = scrollInner.style.width;
-    hlLayer.style.height = scrollInner.style.height;
-  }
+  const containerW = scrollCont.clientWidth;
+  const containerH = scrollCont.clientHeight;
+  const layers = [textarea, syntaxLayer, hlLayer];
+
+  scrollInner.style.width = containerW + 'px';
+  scrollInner.style.height = containerH + 'px';
+  layers.forEach((layer) => {
+    layer.style.width = wordWrapOn ? containerW + 'px' : '100%';
+    layer.style.height = '0px';
+  });
+
+  const contentH = textarea.scrollHeight;
+  const contentW = wordWrapOn ? containerW : textarea.scrollWidth;
+  const finalH = Math.max(contentH, containerH);
+  const finalW = Math.max(contentW, containerW);
+
+  scrollInner.style.width = finalW + 'px';
+  scrollInner.style.height = finalH + 'px';
+  layers.forEach((layer) => {
+    layer.style.width = finalW + 'px';
+    layer.style.height = finalH + 'px';
+  });
+}
+
+function remeasureEditor() {
+  resizeTextarea();
+  requestAnimationFrame(() => {
+    resizeTextarea();
+    syncGutterScroll();
+  });
 }
 
 // ── LINE NUMBERS ──
@@ -986,6 +983,7 @@ window.__voidHandleBack = function () {
     if (previewOverlay.classList.contains('open')) { closePreview(); backErrorStreak = 0; return true; }
     // Menu "tambah" di explorer adalah popover ringan: tutup dulu sebelum navigasi.
     if (sftpActionMenu && sftpActionMenu.classList.contains('open')) { closeSftpActions(); backErrorStreak = 0; return true; }
+    if (localActionMenu && localActionMenu.classList.contains('open')) { closeLocalActions(); backErrorStreak = 0; return true; }
     // Panel Explorer: naik satu level folder / kembali ke hub. Koneksi SFTP TIDAK diputus,
     // jadi Back tidak pernah memaksa user reconnect.
     if (sftpPanel.classList.contains('open')) { explorerBack(); backErrorStreak = 0; return true; }
@@ -1071,6 +1069,7 @@ const sftpBreadcrumb = document.getElementById('sftp-breadcrumb');
 const sftpPathLabel = document.getElementById('sftp-path-label');
 const sftpServerLabel = document.getElementById('sftp-server-label');
 const sftpActionMenu = document.getElementById('sftp-action-menu');
+const localActionMenu = document.getElementById('local-action-menu');
 const sftpProgressEl = document.getElementById('sftp-progress');
 const sftpToastEl = document.getElementById('sftp-toast');
 
@@ -1078,6 +1077,7 @@ let sftpConnected = false;
 let currentDir = '/';
 let sftpHomeDir = '/';   // titik awal browsing (home server) — batas "naik 1 level" tombol Back
 let selectedEntry = null;
+let selectedEntrySource = 'sftp';
 let pendingConnectConfig = null;    // dipakai saat konfirmasi host key
 let pendingCreateKind = null;       // 'file' | 'folder'
 const pendingRequests = new Map();  // requestId -> {resolve, reject}
@@ -1129,7 +1129,7 @@ function openSftpPanel() {
   if (sftpConnected) showExplorerView('sftp');
   else { showExplorerView('home'); renderExplorerHome(); }
 }
-function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); }
+function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); closeLocalActions(); }
 
 /* ══════════ HUB PENJELAJAH BERKAS (Fitur A / C / E) ══════════ */
 const explorerHome = document.getElementById('explorer-home');
@@ -1162,6 +1162,7 @@ function showExplorerView(view) {
     explorerTitle.textContent = view === 'connect' ? 'Koneksi SFTP' : 'SFTP Explorer';
   }
   closeSftpActions();
+  closeLocalActions();
 }
 
 // Naikkan path satu level: '/var/www/html' → '/var/www'. Root ('/') tetap '/'.
@@ -1568,7 +1569,8 @@ function renderLocalEntries(entries) {
         } else {
           openLocalFile(entry);
         }
-      }
+      },
+      onLongPress: () => openLocalItemMenu(entry)
     }));
   });
 }
@@ -1580,6 +1582,35 @@ async function openLocalFile(entry) {
     await callBridge(null, (id) => bridge.localOpen(id, entry.uri));
     closeSftpPanel();
   } catch (err) { sftpToast(err.message); }
+}
+
+function toggleLocalActions() { localActionMenu.classList.toggle('open'); }
+function closeLocalActions() { localActionMenu.classList.remove('open'); }
+
+function openLocalItemMenu(entry) {
+  selectedEntry = entry;
+  selectedEntrySource = 'local';
+  document.getElementById('sftp-item-title').textContent = entry.name;
+  document.getElementById('sftp-item-path').textContent = decodeURIComponent(entry.uri);
+  document.getElementById('sftp-item-dialog').showModal();
+}
+
+function uploadLocalFile() {
+  closeLocalActions();
+  const current = localStack[localStack.length - 1];
+  if (!current) return;
+  callBridge(null, (id) => bridge.localUpload(id, current.uri))
+    .then(() => { sftpToast('File diunggah'); loadLocalList(); })
+    .catch((err) => sftpToast(err.message));
+}
+
+function importLocalZip() {
+  closeLocalActions();
+  const current = localStack[localStack.length - 1];
+  if (!current) return;
+  callBridge(null, (id) => bridge.localImportZip(id, current.uri))
+    .then(() => { sftpToast('ZIP diimpor'); loadLocalList(); })
+    .catch((err) => sftpToast(err.message));
 }
 
 function toggleSftpAuth() {
@@ -1823,8 +1854,10 @@ function closeSftpActions() { sftpActionMenu.classList.remove('open'); }
 
 function promptCreate(kind) {
   closeSftpActions();
+  closeLocalActions();
   pendingCreateKind = kind;
   selectedEntry = null;
+  selectedEntrySource = explorerView === 'local' ? 'local' : 'sftp';
   document.getElementById('sftp-input-title').textContent = kind === 'folder' ? 'Folder baru' : 'File baru';
   const input = document.getElementById('sftp-input-value');
   input.value = '';
@@ -1839,17 +1872,32 @@ async function submitSftpInput(event) {
   if (value.includes('/') || value === '.' || value === '..') { sftpToast('Nama tidak valid'); return; }
   document.getElementById('sftp-input-dialog').close();
   try {
-    if (selectedEntry) {
-      await callBridge(null, (id) => bridge.sftpRename(id, currentDir, selectedEntry.name, value));
-      sftpToast('Nama diubah');
-    } else if (pendingCreateKind === 'folder') {
-      await callBridge(null, (id) => bridge.sftpCreateFolder(id, currentDir, value));
-      sftpToast('Folder dibuat');
+    if (selectedEntrySource === 'local') {
+      const current = localStack[localStack.length - 1];
+      if (!current) throw new Error('Folder lokal tidak tersedia');
+      if (selectedEntry) {
+        const renamed = await callBridge(null, (id) => bridge.localRename(id, selectedEntry.uri, value));
+        const stackItem = localStack.find((item) => item.uri === selectedEntry.uri);
+        if (stackItem) { stackItem.uri = renamed.uri; stackItem.label = value; }
+        sftpToast('Nama diubah');
+      } else {
+        await callBridge(null, (id) => bridge.localCreate(id, current.uri, value, pendingCreateKind === 'folder'));
+        sftpToast(pendingCreateKind === 'folder' ? 'Folder dibuat' : 'File dibuat');
+      }
+      loadLocalList();
     } else {
-      await callBridge(null, (id) => bridge.sftpCreateFile(id, currentDir, value));
-      sftpToast('File dibuat');
+      if (selectedEntry) {
+        await callBridge(null, (id) => bridge.sftpRename(id, currentDir, selectedEntry.name, value));
+        sftpToast('Nama diubah');
+      } else if (pendingCreateKind === 'folder') {
+        await callBridge(null, (id) => bridge.sftpCreateFolder(id, currentDir, value));
+        sftpToast('Folder dibuat');
+      } else {
+        await callBridge(null, (id) => bridge.sftpCreateFile(id, currentDir, value));
+        sftpToast('File dibuat');
+      }
+      listDir();
     }
-    listDir();
   } catch (err) { sftpToast(err.message); }
   selectedEntry = null;
 }
@@ -1871,6 +1919,7 @@ function importSftpZip() {
 /* ── Aksi per item ── */
 function openItemMenu(entry) {
   selectedEntry = entry;
+  selectedEntrySource = 'sftp';
   document.getElementById('sftp-item-title').textContent = entry.name;
   document.getElementById('sftp-item-path').textContent = entry.path;
   document.getElementById('sftp-item-dialog').showModal();
@@ -1891,17 +1940,22 @@ async function deleteSelectedItem() {
   document.getElementById('sftp-item-dialog').close();
   if (!selectedEntry) return;
   const entry = selectedEntry;
-  const ok = await showConfirm(
-    `Hapus "${entry.name}"${entry.directory ? ' beserta seluruh isinya' : ''}?`, 'Hapus', 'Batal'
-  );
+  const local = selectedEntrySource === 'local';
+  const warning = local
+    ? `Hapus permanen "${entry.name}"${entry.directory ? ' beserta seluruh isinya' : ''} dari perangkat? Tindakan ini tidak dapat dibatalkan.`
+    : `Hapus "${entry.name}"${entry.directory ? ' beserta seluruh isinya' : ''}?`;
+  const ok = await showConfirm(warning, 'Hapus', 'Batal');
   if (ok !== 'ok') return;
   try {
-    await callBridge(null, (id) => bridge.sftpDelete(id, entry.path));
+    if (local) {
+      await callBridge(null, (id) => bridge.localDelete(id, entry.uri));
+      loadLocalList();
+    } else {
+      await callBridge(null, (id) => bridge.sftpDelete(id, entry.path));
+      if (remoteFileHint === entry.path) remoteFileHint = null;
+      listDir();
+    }
     sftpToast('Terhapus');
-    // MainActivity.sftpDelete sudah mengosongkan activeRemotePath-nya sendiri;
-    // JS tidak boleh ikut menulis state itu agar tidak terjadi desinkronisasi.
-    if (remoteFileHint === entry.path) remoteFileHint = null;
-    listDir();
   } catch (err) { sftpToast(err.message); }
   selectedEntry = null;
 }
@@ -1910,7 +1964,9 @@ function copySelectedUri() {
   document.getElementById('sftp-item-dialog').close();
   if (!selectedEntry) return;
   const label = sftpServerLabel.textContent;
-  const uri = `sftp://${label}${selectedEntry.path}`;
+  const uri = selectedEntrySource === 'local'
+    ? selectedEntry.uri
+    : `sftp://${label}${selectedEntry.path}`;
   if (navigator.clipboard) navigator.clipboard.writeText(uri).then(() => sftpToast('URI disalin')).catch(() => sftpToast(uri));
   else sftpToast(uri);
   selectedEntry = null;

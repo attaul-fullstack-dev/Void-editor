@@ -43,6 +43,13 @@ class SftpManager {
     private var sftp: SFTPClient? = null
     private var pendingFingerprint: String? = null
 
+    /**
+     * Config terakhir yang BERHASIL terautentikasi. Dipakai untuk memulihkan sesi secara
+     * senyap bila server memutus koneksi idle (penyebab utama "Save ke SFTP gagal": user
+     * mengedit beberapa menit, sesi mati, lalu tulis ditolak "Koneksi SFTP terputus").
+     */
+    private var lastConfig: Config? = null
+
     fun connect(config: Config): ConnectResult = lock.withLock {
         disconnectLocked()
         require(config.host.isNotBlank()) { "Host wajib diisi" }
@@ -94,10 +101,15 @@ class SftpManager {
                 config.password != null -> client.authPassword(config.username, config.password)
                 else -> error("Password atau private key wajib dipilih")
             }
+            // Keep-alive: tanpa ini server/NAT memutus sesi yang idle beberapa menit dan
+            // operasi tulis berikutnya gagal walau UI masih menampilkan "tersambung".
+            runCatching { client.connection.keepAlive.keepAliveInterval = 30 }
             val channel = client.newSFTPClient()
             ssh = client
             sftp = channel
             pendingFingerprint = null
+            // Simpan config lengkap (termasuk fingerprint terpercaya) untuk pemulihan sesi.
+            lastConfig = config
             ConnectResult.Connected(channel.canonicalize("."))
         } catch (error: Exception) {
             runCatching { client.disconnect() }
@@ -171,8 +183,14 @@ class SftpManager {
         }
     }
 
-    fun disconnect() = lock.withLock { disconnectLocked() }
-    fun isConnected(): Boolean = lock.withLock { ssh?.isConnected == true && ssh?.isAuthenticated == true }
+    /** Putus eksplisit oleh user: kredensial pemulihan dibuang agar tidak reconnect senyap. */
+    fun disconnect() = lock.withLock {
+        lastConfig = null
+        disconnectLocked()
+    }
+
+    /** True bila sesi hidup ATAU masih bisa dipulihkan otomatis (dipakai UI/tombol Back). */
+    fun isConnected(): Boolean = lock.withLock { sessionAlive() || lastConfig != null }
 
     private fun deleteRecursive(client: SFTPClient, path: String) {
         val attrs = client.stat(path)
@@ -182,10 +200,30 @@ class SftpManager {
         } else client.rm(path)
     }
 
+    private fun sessionAlive(): Boolean = sftp != null && ssh?.isConnected == true && ssh?.isAuthenticated == true
+
+    /**
+     * Semua operasi lewat sini. Bila sesi sudah mati tapi kita masih punya kredensial yang
+     * terbukti benar, sesi dipulihkan sekali secara senyap sebelum operasi dijalankan —
+     * user tidak perlu reconnect manual, dan Save tidak lagi gagal karena idle timeout.
+     */
     private fun <T> withClient(block: (SFTPClient) -> T): T = lock.withLock {
+        if (!sessionAlive()) {
+            val config = lastConfig ?: error("Belum terhubung ke server")
+            val recovered = runCatching { connect(config) }.getOrNull()
+            if (recovered !is ConnectResult.Connected) error("Koneksi SFTP terputus dan gagal dipulihkan")
+        }
         val client = sftp ?: error("Belum terhubung ke server")
-        check(ssh?.isConnected == true && ssh?.isAuthenticated == true) { "Koneksi SFTP terputus" }
-        block(client)
+        try {
+            block(client)
+        } catch (error: Exception) {
+            // Koneksi bisa mati tepat di tengah operasi: coba sekali lagi dengan sesi baru.
+            if (sessionAlive()) throw error
+            val config = lastConfig ?: throw error
+            val recovered = runCatching { connect(config) }.getOrNull()
+            if (recovered !is ConnectResult.Connected) throw error
+            block(sftp ?: throw error)
+        }
     }
 
     private fun disconnectLocked() {

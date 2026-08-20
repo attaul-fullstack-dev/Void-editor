@@ -193,9 +193,12 @@ class SftpManager {
     fun isConnected(): Boolean = lock.withLock { sessionAlive() || lastConfig != null }
 
     private fun deleteRecursive(client: SFTPClient, path: String) {
-        val attrs = client.stat(path)
+        // lstat mencegah symlink ke direktori diikuti dan menghapus isi targetnya.
+        val attrs = client.lstat(path)
         if (attrs.type == FileMode.Type.DIRECTORY) {
-            client.ls(path).filter { it.name != "." && it.name != ".." }.forEach { deleteRecursive(client, join(path, it.name)) }
+            client.ls(path)
+                .filter { it.name != "." && it.name != ".." }
+                .forEach { deleteRecursive(client, join(path, it.name)) }
             client.rmdir(path)
         } else client.rm(path)
     }

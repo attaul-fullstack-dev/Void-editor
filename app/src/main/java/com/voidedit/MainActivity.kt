@@ -322,6 +322,35 @@ class MainActivity : AppCompatActivity() {
         return array
     }
 
+    /** Hapus isi folder SAF dari level terdalam sebelum menghapus folder induknya. */
+    private fun deleteDocumentRecursively(uri: Uri, directoryHint: Boolean? = null) {
+        val isDirectory = directoryHint
+            ?: (contentResolver.getType(uri) == DocumentsContract.Document.MIME_TYPE_DIR)
+        if (isDirectory) {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(uri, documentIdOf(uri))
+            val children = mutableListOf<Pair<Uri, Boolean>>()
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+            contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val documentId = cursor.getString(0) ?: continue
+                    val mime = cursor.getString(1)
+                    children += DocumentsContract.buildDocumentUriUsingTree(uri, documentId) to
+                        (mime == DocumentsContract.Document.MIME_TYPE_DIR)
+                }
+            } ?: error("Isi folder tidak dapat dibaca")
+            children.forEach { (childUri, childIsDirectory) ->
+                deleteDocumentRecursively(childUri, childIsDirectory)
+            }
+        }
+        check(DocumentsContract.deleteDocument(contentResolver, uri)) { "Item tidak dapat dihapus" }
+        if (currentFileUri == uri) runOnUiThread {
+            if (currentFileUri == uri) currentFileUri = null
+        }
+    }
+
     private fun validateDocumentName(name: String) {
         require(name.isNotBlank() && name != "." && name != ".." && !name.contains('/')) { "Nama tidak valid" }
     }
@@ -991,8 +1020,7 @@ class MainActivity : AppCompatActivity() {
         fun localDelete(requestId: String, uriString: String) {
             runTask(requestId, "localDelete") {
                 val uri = Uri.parse(uriString)
-                check(DocumentsContract.deleteDocument(contentResolver, uri)) { "Item tidak dapat dihapus" }
-                if (currentFileUri == uri) runOnUiThread { currentFileUri = null }
+                deleteDocumentRecursively(uri)
                 JSONObject().put("uri", uriString)
             }
         }

@@ -269,6 +269,15 @@ class MainActivity : AppCompatActivity() {
         if (DocumentsContract.isDocumentUri(this, uri)) DocumentsContract.getDocumentId(uri)
         else DocumentsContract.getTreeDocumentId(uri)
 
+    /**
+     * ACTION_OPEN_DOCUMENT_TREE menghasilkan tree URI. URI itu cukup untuk listing,
+     * tetapi operasi tulis DocumentsContract membutuhkan parent document URI.
+     * Subfolder dari listTree sudah berupa document URI dan dipertahankan apa adanya.
+     */
+    private fun writableDocumentUri(uri: Uri): Uri =
+        if (DocumentsContract.isDocumentUri(this, uri)) uri
+        else DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+
     // Listing folder SAF lewat DocumentsContract (content URI, bukan java.io.File).
     // Filter "berkas tersembunyi" membaca SharedPreferences yang SAMA dengan listing SFTP
     // (satu sumber kebenaran), sehingga toggle di Pengaturan berlaku konsisten di semua listing.
@@ -320,7 +329,7 @@ class MainActivity : AppCompatActivity() {
     private fun createDocument(parent: Uri, name: String, directory: Boolean): Uri {
         validateDocumentName(name)
         val mime = if (directory) DocumentsContract.Document.MIME_TYPE_DIR else "text/plain"
-        return DocumentsContract.createDocument(contentResolver, parent, mime, name)
+        return DocumentsContract.createDocument(contentResolver, writableDocumentUri(parent), mime, name)
             ?: error("Item tidak dapat dibuat")
     }
 
@@ -328,7 +337,7 @@ class MainActivity : AppCompatActivity() {
         val name = getFileName(source)
         validateDocumentName(name)
         val mime = contentResolver.getType(source) ?: "application/octet-stream"
-        val target = DocumentsContract.createDocument(contentResolver, parent, mime, name)
+        val target = DocumentsContract.createDocument(contentResolver, writableDocumentUri(parent), mime, name)
             ?: error("File tidak dapat dibuat")
         try {
             contentResolver.openInputStream(source)?.use { input ->
@@ -350,7 +359,7 @@ class MainActivity : AppCompatActivity() {
                 copyFileTreeToSaf(child, directory)
             } else {
                 val target = DocumentsContract.createDocument(
-                    contentResolver, parent, "application/octet-stream", child.name
+                    contentResolver, writableDocumentUri(parent), "application/octet-stream", child.name
                 ) ?: error("Gagal membuat ${child.name}")
                 contentResolver.openOutputStream(target, "w")?.use { output ->
                     child.inputStream().use { input -> input.copyTo(output) }

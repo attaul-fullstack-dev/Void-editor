@@ -605,17 +605,35 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    writeDownloadToUri(uri) { output ->
-                        if (pending.archive) {
-                            sftp.downloadZip(pending.items, output) { done, total, label ->
-                                emitProgress(pending.requestId, done, total, label, "download")
-                            }
-                        } else {
-                            sftp.downloadFile(pending.items.single().path, output)
+                    val transfer = SftpManager()
+                    try {
+                        val config = sftp.authenticatedConfig()
+                            ?: error("Koneksi SFTP sudah tidak aktif")
+                        when (transfer.connect(config)) {
+                            is SftpManager.ConnectResult.Connected -> Unit
+                            is SftpManager.ConnectResult.HostKeyRequired ->
+                                error("Fingerprint koneksi download belum dipercaya")
                         }
+                        var lastProgressAt = 0L
+                        writeDownloadToUri(uri) { output ->
+                            if (pending.archive) {
+                                transfer.downloadZip(pending.items, output) { done, total, label ->
+                                    val now = System.currentTimeMillis()
+                                    if (total > 0 || lastProgressAt == 0L || now - lastProgressAt >= 250L) {
+                                        lastProgressAt = now
+                                        emitProgress(pending.requestId, done, total, label, "download")
+                                    }
+                                }
+                            } else {
+                                transfer.downloadFile(pending.items.single().path, output)
+                            }
+                        }
+                    } finally {
+                        transfer.disconnect()
                     }
                 }
             }
+            emitProgress(pending.requestId, 0, 0, "", "download", finished = true)
             result.fold(
                 onSuccess = {
                     toast("Download tersimpan: " + pending.fileName)
@@ -658,7 +676,8 @@ class MainActivity : AppCompatActivity() {
         done: Int,
         total: Int,
         label: String,
-        operation: String = "upload"
+        operation: String = "upload",
+        finished: Boolean = false
     ) {
         val payload = JSONObject()
             .put("requestId", requestId)
@@ -666,6 +685,7 @@ class MainActivity : AppCompatActivity() {
             .put("total", total)
             .put("label", label)
             .put("operation", operation)
+            .put("finished", finished)
             .toString()
         webView.post {
             webView.evaluateJavascript("window.onSftpProgress && window.onSftpProgress($payload)", null)

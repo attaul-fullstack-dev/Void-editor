@@ -1122,10 +1122,18 @@ window.onSftpResult = function (payload) {
 };
 
 window.onSftpProgress = function (payload) {
-  sftpProgressEl.classList.add('visible');
+  if (payload.finished) {
+    sftpProgressEl.classList.remove("visible");
+    sftpProgressEl.textContent = "";
+    return;
+  }
+  sftpProgressEl.classList.add("visible");
   const verb = payload.operation === "download" ? "Mengunduh" : "Mengunggah";
-  sftpProgressEl.textContent = verb + " " + payload.done + "/" + payload.total + " — " + payload.label;
-  if (payload.done >= payload.total) setTimeout(() => sftpProgressEl.classList.remove('visible'), 1200);
+  const count = payload.total > 0 ? payload.done + "/" + payload.total : payload.done + " item";
+  sftpProgressEl.textContent = verb + " " + count + " — " + payload.label;
+  if (payload.total > 0 && payload.done >= payload.total) {
+    setTimeout(() => sftpProgressEl.classList.remove("visible"), 1200);
+  }
 };
 
 function openSftpPanel() {

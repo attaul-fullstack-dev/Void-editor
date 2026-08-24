@@ -1308,7 +1308,8 @@ function openConnectForm(saved) {
     saved && saved.privateKeyPath ? saved.privateKeyPath.split('/').pop() : 'Pilih private key';
   document.getElementById('sftp-label').value = saved ? saved.label : '';
   document.getElementById('sftp-remember-row').style.display = isEdit ? 'none' : '';
-  document.getElementById('sftp-connect-button').textContent = isEdit ? 'Simpan Perubahan' : 'Hubungkan';
+  document.getElementById("sftp-connect-button").textContent = isEdit ? "Simpan Perubahan" : "Hubungkan";
+  document.getElementById("sftp-delete-button").hidden = !isEdit;
   toggleSftpAuth();
   showExplorerView('connect');
 }
@@ -1383,17 +1384,41 @@ function editSavedConnection() {
 }
 
 async function deleteSavedConnection() {
-  document.getElementById('saved-item-dialog').close();
+  document.getElementById("saved-item-dialog").close();
   if (!selectedSaved) return;
   const target = selectedSaved;
-  const ok = await showConfirm(`Hapus koneksi "${target.label}"?`, 'Hapus', 'Batal');
-  if (ok !== 'ok') return;
-  try {
-    callSync(() => bridge.deleteConnection(target.id), 'Hapus koneksi');
-    sftpToast('Koneksi dihapus');
-  } catch (err) { sftpToast(err.message); }
+  const deleted = await deleteStoredConnection(target);
+  if (!deleted) return;
   selectedSaved = null;
   renderSavedConnections();
+}
+
+async function deleteEditingConnection() {
+  if (!editingConnectionId) return;
+  const target = {
+    id: editingConnectionId,
+    label: document.getElementById("sftp-label").value.trim() || "Koneksi"
+  };
+  const deleted = await deleteStoredConnection(target);
+  if (!deleted) return;
+  editingConnectionId = null;
+  selectedSaved = null;
+  showExplorerView("home");
+  renderExplorerHome();
+}
+
+async function deleteStoredConnection(target) {
+  const message = "Hapus koneksi \"" + target.label + "\" beserta fingerprint host tersimpan?";
+  const ok = await showConfirm(message, "Hapus", "Batal");
+  if (ok !== "ok") return false;
+  try {
+    callSync(() => bridge.deleteConnection(target.id), "Hapus koneksi");
+    sftpToast("Koneksi dan fingerprint dihapus");
+    return true;
+  } catch (err) {
+    sftpToast(err.message);
+    return false;
+  }
 }
 
 // Simpan koneksi baru setelah connect berhasil, bila checkbox "Simpan koneksi" aktif.

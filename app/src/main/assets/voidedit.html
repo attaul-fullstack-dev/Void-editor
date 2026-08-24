@@ -141,6 +141,7 @@
       <div class="field"><label for="sftp-label">Nama koneksi (opsional)</label><input id="sftp-label" placeholder="root" autocapitalize="off"></div>
       <label class="settings-row" id="sftp-remember-row"><span>Simpan koneksi ini (terenkripsi)</span><input id="sftp-remember" type="checkbox" checked></label>
       <button class="primary-action" id="sftp-connect-button" type="submit">Hubungkan</button>
+      <button class="secondary-action danger-action" id="sftp-delete-button" type="button" onclick="deleteEditingConnection()" hidden>Hapus koneksi</button>
       <button class="secondary-action" id="sftp-form-cancel" type="button" onclick="showExplorerView('home')">Batal</button>
     </form>
   </div>

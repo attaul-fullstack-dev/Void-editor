@@ -887,10 +887,17 @@
   .crumb { flex: 0 0 auto; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); padding: 6px 7px; font-size: 13px; cursor: pointer; }
   .crumb:last-child { color: var(--teal); background: var(--teal-dim); }
   #sftp-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
+  #sftp-selection-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); }
+  #sftp-selection-bar[hidden] { display: none; }
+  #sftp-selection-count { flex: 1; color: var(--teal); font-size: 12px; font-weight: 700; }
+  .selection-action { min-height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; cursor: pointer; }
+  .selection-action.primary { border-color: transparent; background: var(--teal); color: var(--bg-base); }
   #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #sftp-list { flex: 1; overflow-y: auto; padding: 6px; }
   .file-row { width: 100%; display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; touch-action: pan-y; }
   .file-row:active { background: var(--bg-elevated); }
+  .file-row.selected { background: var(--teal-dim); box-shadow: inset 3px 0 0 var(--teal); }
+  .file-row.selected .file-icon { background: var(--teal); color: var(--bg-base); }
   .file-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); color: var(--teal); font: 700 12px 'JetBrains Mono', monospace; }
   .file-info { flex: 1; min-width: 0; }
   .file-name { display: block; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

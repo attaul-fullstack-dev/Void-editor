@@ -1071,6 +1071,9 @@ const sftpServerLabel = document.getElementById('sftp-server-label');
 const sftpActionMenu = document.getElementById('sftp-action-menu');
 const localActionMenu = document.getElementById('local-action-menu');
 const sftpProgressEl = document.getElementById('sftp-progress');
+const sftpSelectionBar = document.getElementById('sftp-selection-bar');
+const sftpSelectionCount = document.getElementById('sftp-selection-count');
+const sftpFab = document.getElementById('sftp-fab');
 const sftpToastEl = document.getElementById('sftp-toast');
 
 let sftpConnected = false;
@@ -1082,6 +1085,8 @@ let pendingConnectConfig = null;    // dipakai saat konfirmasi host key
 let pendingCreateKind = null;       // 'file' | 'folder'
 const pendingRequests = new Map();  // requestId -> {resolve, reject}
 let requestSeq = 0;
+let currentSftpEntries = [];
+const selectedSftpEntries = new Map();
 
 const settings = { sortAscending: true, showHidden: false, autoList: true };
 
@@ -1118,7 +1123,8 @@ window.onSftpResult = function (payload) {
 
 window.onSftpProgress = function (payload) {
   sftpProgressEl.classList.add('visible');
-  sftpProgressEl.textContent = `Mengunggah ${payload.done}/${payload.total} — ${payload.label}`;
+  const verb = payload.operation === "download" ? "Mengunduh" : "Mengunggah";
+  sftpProgressEl.textContent = verb + " " + payload.done + "/" + payload.total + " — " + payload.label;
   if (payload.done >= payload.total) setTimeout(() => sftpProgressEl.classList.remove('visible'), 1200);
 };
 
@@ -1129,7 +1135,7 @@ function openSftpPanel() {
   if (sftpConnected) showExplorerView('sftp');
   else { showExplorerView('home'); renderExplorerHome(); }
 }
-function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); closeLocalActions(); }
+function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); closeLocalActions(); clearSftpSelection(false); }
 
 /* ══════════ HUB PENJELAJAH BERKAS (Fitur A / C / E) ══════════ */
 const explorerHome = document.getElementById('explorer-home');
@@ -1147,6 +1153,7 @@ let localBookmarkLabel = '';
 
 function showExplorerView(view) {
   explorerView = view;
+  if (view !== 'sftp') clearSftpSelection(false);
   explorerHome.classList.toggle('visible', view === 'home');
   sftpConnectView.style.display = view === 'connect' ? '' : 'none';
   sftpBrowser.classList.toggle('visible', view === 'sftp');
@@ -1176,6 +1183,7 @@ function parentDirOf(path) {
 // Di browser SFTP, Back naik 1 level folder dulu (pakai koneksi yang masih terbuka, tanpa
 // reconnect); baru setelah di root/home keluar ke hub. Sesi SFTP TIDAK diputus.
 function explorerBack() {
+  if (explorerView === 'sftp' && selectedSftpEntries.size) { clearSftpSelection(); return; }
   if (explorerView === 'local' && localStack.length > 1) { localGoUp(); return; }
   if (explorerView === 'sftp' && sftpConnected) {
     const atRoot = currentDir === '/' || currentDir === sftpHomeDir;
@@ -1615,6 +1623,8 @@ function closeLocalActions() { localActionMenu.classList.remove('open'); }
 function openLocalItemMenu(entry) {
   selectedEntry = entry;
   selectedEntrySource = 'local';
+  document.getElementById('sftp-item-download').hidden = true;
+  document.getElementById('sftp-item-select').hidden = true;
   document.getElementById('sftp-item-title').textContent = entry.name;
   document.getElementById('sftp-item-path').textContent = decodeURIComponent(entry.uri);
   document.getElementById('sftp-item-dialog').showModal();
@@ -1748,6 +1758,7 @@ function onConnected(config, home, options) {
 }
 
 async function disconnectSftp() {
+  clearSftpSelection(false);
   try { await callBridge(null, (id) => bridge.sftpDisconnect(id)); } catch (_) {}
   sftpConnected = false;
   sftpListEl.innerHTML = '';
@@ -1758,6 +1769,7 @@ async function disconnectSftp() {
 }
 
 function navigateTo(path) {
+  clearSftpSelection(false);
   currentDir = path || '/';
   renderBreadcrumb();
   sftpPathLabel.textContent = currentDir;
@@ -1816,7 +1828,74 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + units[i];
 }
 
+function updateSftpSelectionUi() {
+  const count = selectedSftpEntries.size;
+  sftpSelectionBar.hidden = count === 0;
+  sftpSelectionCount.textContent = count + " dipilih";
+  sftpFab.style.display = count ? "none" : "";
+}
+
+function clearSftpSelection(rerender = true) {
+  selectedSftpEntries.clear();
+  updateSftpSelectionUi();
+  if (rerender) renderEntries(currentSftpEntries);
+}
+
+function toggleSftpSelection(entry) {
+  if (selectedSftpEntries.has(entry.path)) selectedSftpEntries.delete(entry.path);
+  else selectedSftpEntries.set(entry.path, entry);
+  updateSftpSelectionUi();
+  renderEntries(currentSftpEntries);
+}
+
+function selectCurrentSftpItem() {
+  document.getElementById("sftp-item-dialog").close();
+  if (!selectedEntry || selectedEntrySource !== "sftp") return;
+  toggleSftpSelection(selectedEntry);
+  selectedEntry = null;
+}
+
+function archiveNameFor(items) {
+  if (items.length === 1 && items[0].directory) return items[0].name;
+  const currentName = currentDir.split("/").filter(Boolean).pop() || "sftp";
+  return currentName + "-download";
+}
+
+async function startSftpDownload(items) {
+  if (!items.length) return;
+  if (!bridge.sftpDownload) { sftpToast("Fitur download butuh versi aplikasi terbaru"); return; }
+  const payload = items.map((item) => ({
+    name: item.name,
+    path: item.path,
+    directory: !!item.directory
+  }));
+  const archive = items.length > 1 || !!items[0].directory;
+  sftpToast(archive ? "Menyiapkan ZIP…" : "Menyiapkan download…");
+  try {
+    const result = await callBridge(null, (id) =>
+      bridge.sftpDownload(id, JSON.stringify(payload), archiveNameFor(items))
+    );
+    sftpToast("Tersimpan: " + (result.name || "download"));
+    clearSftpSelection();
+  } catch (err) {
+    sftpToast(err.message);
+  }
+}
+
+function downloadSftpSelection() {
+  startSftpDownload(Array.from(selectedSftpEntries.values()));
+}
+
+function downloadSelectedItem() {
+  document.getElementById("sftp-item-dialog").close();
+  if (!selectedEntry || selectedEntrySource !== "sftp") return;
+  const target = selectedEntry;
+  selectedEntry = null;
+  startSftpDownload([target]);
+}
+
 function renderEntries(entries) {
+  currentSftpEntries = Array.isArray(entries) ? entries : [];
   sftpListEl.innerHTML = '';
   if (!entries.length) { renderState('Folder kosong'); return; }
   entries.forEach((entry) => {
@@ -1824,7 +1903,10 @@ function renderEntries(entries) {
     row.type = 'button'; row.className = 'file-row'; row.setAttribute('role', 'listitem');
     const icon = document.createElement('div'); icon.className = 'file-icon';
     const isImg = !entry.directory && isImageName(entry.name);
-    icon.textContent = entry.directory ? 'DIR' : (isImg ? 'IMG' : (entry.name.split('.').pop().slice(0, 3).toUpperCase() || 'TXT'));
+    const selected = selectedSftpEntries.has(entry.path);
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-pressed', String(selected));
+    icon.textContent = selected ? '✓' : (entry.directory ? 'DIR' : (isImg ? 'IMG' : (entry.name.split('.').pop().slice(0, 3).toUpperCase() || 'TXT')));
     const info = document.createElement('div'); info.className = 'file-info';
     const name = document.createElement('span'); name.className = 'file-name'; name.textContent = entry.name; // textContent mencegah HTML injection
     const meta = document.createElement('span'); meta.className = 'file-meta';
@@ -1844,13 +1926,18 @@ function attachRowGestures(row, entry) {
   const cancel = () => { clearTimeout(timer); timer = null; };
   row.addEventListener('pointerdown', (e) => {
     longPressed = false; startY = e.clientY;
-    timer = setTimeout(() => { longPressed = true; openItemMenu(entry); }, 500);
+    timer = setTimeout(() => {
+      longPressed = true;
+      if (selectedSftpEntries.size) toggleSftpSelection(entry);
+      else openItemMenu(entry);
+    }, 500);
   });
   row.addEventListener('pointermove', (e) => { if (Math.abs(e.clientY - startY) > 10) cancel(); });
   row.addEventListener('pointerup', cancel);
   row.addEventListener('pointercancel', cancel);
   row.addEventListener('click', () => {
     if (longPressed) { longPressed = false; return; }
+    if (selectedSftpEntries.size) { toggleSftpSelection(entry); return; }
     if (entry.directory) navigateTo(entry.path);
     else openRemoteFile(entry);
   });
@@ -1945,6 +2032,8 @@ function importSftpZip() {
 function openItemMenu(entry) {
   selectedEntry = entry;
   selectedEntrySource = 'sftp';
+  document.getElementById('sftp-item-download').hidden = false;
+  document.getElementById('sftp-item-select').hidden = false;
   document.getElementById('sftp-item-title').textContent = entry.name;
   document.getElementById('sftp-item-path').textContent = entry.path;
   document.getElementById('sftp-item-dialog').showModal();

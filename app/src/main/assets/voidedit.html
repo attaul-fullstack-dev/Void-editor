@@ -166,6 +166,7 @@
   <div id="sftp-browser">
     <nav id="sftp-breadcrumb" aria-label="Lokasi remote"></nav>
     <div id="sftp-toolbar"><span id="sftp-path-label">/</span><button class="icon-btn" type="button" onclick="refreshSftp()" aria-label="Refresh">↻</button><button class="secondary-action" type="button" onclick="disconnectSftp()">Putus</button></div>
+    <div id="sftp-selection-bar" hidden><span id="sftp-selection-count">0 dipilih</span><button class="selection-action primary" type="button" onclick="downloadSftpSelection()">Download</button><button class="selection-action" type="button" onclick="clearSftpSelection()">Batal</button></div>
     <div id="sftp-progress" aria-live="polite"></div>
     <div id="sftp-list" role="list"></div>
     <div id="sftp-action-menu">
@@ -186,7 +187,7 @@
   <div class="dialog-body"><h3>Verifikasi server</h3><p>Pastikan fingerprint SHA-256 ini sesuai dengan server Anda:</p><p id="sftp-fingerprint" style="font-family:'JetBrains Mono',monospace;color:var(--teal)"></p><div class="dialog-actions"><button class="secondary-action" type="button" onclick="rejectHostKey()">Batal</button><button class="primary-action" style="padding:0 16px" type="button" onclick="trustHostKey()">Percayai</button></div></div>
 </dialog>
 <dialog id="sftp-item-dialog" class="sftp-dialog">
-  <div class="dialog-body"><h3 id="sftp-item-title">Aksi item</h3><p id="sftp-item-path"></p><button class="secondary-action" type="button" onclick="renameSelectedItem()">Ubah nama</button><button class="secondary-action" type="button" onclick="copySelectedUri()">Salin URI SFTP</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSelectedItem()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
+  <div class="dialog-body"><h3 id="sftp-item-title">Aksi item</h3><p id="sftp-item-path"></p><button class="secondary-action" id="sftp-item-download" type="button" onclick="downloadSelectedItem()">Download</button><button class="secondary-action" id="sftp-item-select" type="button" onclick="selectCurrentSftpItem()">Pilih untuk multi-select</button><button class="secondary-action" type="button" onclick="renameSelectedItem()">Ubah nama</button><button class="secondary-action" type="button" onclick="copySelectedUri()">Salin URI SFTP</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSelectedItem()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
 </dialog>
 <!-- Long-press koneksi tersimpan: Hapus / Ubah Nama / Edit (Fitur A) -->
 <dialog id="saved-item-dialog" class="sftp-dialog">

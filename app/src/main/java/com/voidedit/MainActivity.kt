@@ -57,6 +57,15 @@ class MainActivity : AppCompatActivity() {
     // requestId yang menunggu hasil ACTION_OPEN_DOCUMENT_TREE (Fitur E).
     private var pendingTreeRequestId: String? = null
 
+    private data class PendingSftpDownload(
+        val requestId: String,
+        val items: List<SftpManager.DownloadItem>,
+        val archive: Boolean,
+        val fileName: String
+    )
+
+    private var pendingSftpDownload: PendingSftpDownload? = null
+
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -102,6 +111,26 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.data?.let { uri -> cb?.invoke(uri) }
         }
+    }
+
+    private val downloadFileLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val pending = pendingSftpDownload
+        pendingSftpDownload = null
+        if (pending == null) return@registerForActivityResult
+        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        if (uri == null) {
+            emitResult(pending.requestId, "download", false, null, "Download dibatalkan")
+            return@registerForActivityResult
+        }
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
+        performSftpDownload(pending, uri)
     }
 
     // Fitur E: pemilih FOLDER (bukan file). Izin dipertahankan agar tetap bisa dibaca
@@ -420,6 +449,13 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
+    private fun safeSuggestedName(raw: String, fallback: String): String =
+        raw.trim()
+            .map { if (it.code < 32 || it.code == 47 || it.code == 92) "_" else it.toString() }
+            .joinToString("")
+            .take(120)
+            .ifBlank { fallback }
+
     private fun extensionOf(name: String) = name.substringAfterLast('.', "").lowercase()
 
     private fun isImage(name: String, mime: String?): Boolean =
@@ -550,6 +586,60 @@ class MainActivity : AppCompatActivity() {
         return count
     }
 
+    private fun writeDownloadToUri(uri: Uri, writer: (java.io.OutputStream) -> Unit) {
+        val direct = runCatching { contentResolver.openOutputStream(uri, "wt") }.getOrNull()
+        if (direct != null) {
+            direct.use(writer)
+            return
+        }
+        contentResolver.openFileDescriptor(uri, "rwt")?.use { descriptor ->
+            java.io.FileOutputStream(descriptor.fileDescriptor).use { stream ->
+                stream.channel.truncate(0)
+                writer(stream)
+                stream.flush()
+            }
+        } ?: error("Lokasi download tidak dapat ditulis")
+    }
+
+    private fun performSftpDownload(pending: PendingSftpDownload, uri: Uri) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    writeDownloadToUri(uri) { output ->
+                        if (pending.archive) {
+                            sftp.downloadZip(pending.items, output) { done, total, label ->
+                                emitProgress(pending.requestId, done, total, label, "download")
+                            }
+                        } else {
+                            sftp.downloadFile(pending.items.single().path, output)
+                        }
+                    }
+                }
+            }
+            result.fold(
+                onSuccess = {
+                    toast("Download tersimpan: " + pending.fileName)
+                    emitResult(
+                        pending.requestId,
+                        "download",
+                        true,
+                        JSONObject().put("name", pending.fileName).put("archive", pending.archive),
+                        null
+                    )
+                },
+                onFailure = {
+                    emitResult(
+                        pending.requestId,
+                        "download",
+                        false,
+                        null,
+                        it.message ?: "Download gagal"
+                    )
+                }
+            )
+        }
+    }
+
     private fun emitResult(requestId: String, action: String, success: Boolean, data: Any?, error: String?) {
         val payload = JSONObject()
             .put("requestId", requestId)
@@ -563,12 +653,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun emitProgress(requestId: String, done: Int, total: Int, label: String) {
+    private fun emitProgress(
+        requestId: String,
+        done: Int,
+        total: Int,
+        label: String,
+        operation: String = "upload"
+    ) {
         val payload = JSONObject()
             .put("requestId", requestId)
             .put("done", done)
             .put("total", total)
             .put("label", label)
+            .put("operation", operation)
             .toString()
         webView.post {
             webView.evaluateJavascript("window.onSftpProgress && window.onSftpProgress($payload)", null)
@@ -761,6 +858,62 @@ class MainActivity : AppCompatActivity() {
                 sftp.delete(path)
                 if (activeRemotePath == path) runOnUiThread { activeRemotePath = null }
                 JSONObject().put("path", path)
+            }
+        }
+
+        @JavascriptInterface
+        fun sftpDownload(requestId: String, itemsJson: String, archiveName: String) {
+            val parsed = runCatching {
+                val array = JSONArray(itemsJson)
+                require(array.length() in 1..500) { "Pilih antara 1 sampai 500 item" }
+                (0 until array.length()).map { index ->
+                    val item = array.getJSONObject(index)
+                    val path = item.getString("path")
+                    require(path.isNotBlank()) { "Path download tidak valid" }
+                    SftpManager.DownloadItem(
+                        name = safeSuggestedName(item.optString("name"), "item"),
+                        path = path,
+                        directory = item.optBoolean("directory", false)
+                    )
+                }
+            }
+            if (parsed.isFailure) {
+                emitResult(
+                    requestId,
+                    "download",
+                    false,
+                    null,
+                    parsed.exceptionOrNull()?.message ?: "Pilihan download tidak valid"
+                )
+                return
+            }
+            val items = parsed.getOrThrow()
+            val archive = items.size > 1 || items.single().directory
+            val suggestedName = if (archive) {
+                val base = safeSuggestedName(archiveName.removeSuffix(".zip"), "voidedit-download")
+                base + ".zip"
+            } else items.single().name
+            runOnUiThread {
+                if (pendingSftpDownload != null) {
+                    emitResult(requestId, "download", false, null, "Pemilih lokasi download masih terbuka")
+                    return@runOnUiThread
+                }
+                pendingSftpDownload = PendingSftpDownload(requestId, items, archive, suggestedName)
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = if (archive) "application/zip" else "application/octet-stream"
+                    putExtra(Intent.EXTRA_TITLE, suggestedName)
+                }
+                runCatching { downloadFileLauncher.launch(intent) }.onFailure { error ->
+                    pendingSftpDownload = null
+                    emitResult(
+                        requestId,
+                        "download",
+                        false,
+                        null,
+                        error.message ?: "Pemilih lokasi download tidak tersedia"
+                    )
+                }
             }
         }
 

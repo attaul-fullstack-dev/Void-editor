@@ -8,9 +8,12 @@ import net.schmizz.sshj.userauth.password.PasswordFinder
 import net.schmizz.sshj.userauth.password.Resource
 import net.schmizz.sshj.common.SecurityUtils
 import java.io.File
+import java.io.OutputStream
 import java.security.PublicKey
 import java.util.EnumSet
 import java.util.concurrent.locks.ReentrantLock
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.concurrent.withLock
 
 class SftpManager {
@@ -31,6 +34,18 @@ class SftpManager {
         val size: Long,
         val modified: Long,
         val permissions: String
+    )
+
+    data class DownloadItem(
+        val name: String,
+        val path: String,
+        val directory: Boolean
+    )
+
+    private data class ZipSource(
+        val remotePath: String,
+        val entryName: String,
+        val directory: Boolean
     )
 
     sealed class ConnectResult {
@@ -183,6 +198,36 @@ class SftpManager {
         }
     }
 
+    /** Stream satu file remote langsung ke output SAF tanpa memuat seluruh file ke memori. */
+    fun downloadFile(path: String, output: OutputStream) = withClient(retryOnDisconnect = false) { client ->
+        copyRemoteFile(client, normalize(path), output)
+    }
+
+    /**
+     * Stream pilihan remote sebagai ZIP. Listing dilakukan lebih dulu agar progress memiliki
+     * total yang stabil. Hidden file tetap disertakan dan symlink tidak diikuti sebagai folder.
+     */
+    fun downloadZip(
+        items: List<DownloadItem>,
+        output: OutputStream,
+        onProgress: (Int, Int, String) -> Unit
+    ) = withClient(retryOnDisconnect = false) { client ->
+        require(items.isNotEmpty()) { "Tidak ada item yang dipilih" }
+        val sources = mutableListOf<ZipSource>()
+        items.forEach { item ->
+            collectZipSources(client, normalize(item.path), safeZipSegment(item.name), sources)
+        }
+        ZipOutputStream(output.buffered()).use { zip ->
+            sources.forEachIndexed { index, source ->
+                val entryName = if (source.directory) source.entryName.removeSuffix("/") + "/" else source.entryName
+                zip.putNextEntry(ZipEntry(entryName))
+                if (!source.directory) copyRemoteFile(client, source.remotePath, zip)
+                zip.closeEntry()
+                onProgress(index + 1, sources.size, entryName)
+            }
+        }
+    }
+
     /** Putus eksplisit oleh user: kredensial pemulihan dibuang agar tidak reconnect senyap. */
     fun disconnect() = lock.withLock {
         lastConfig = null
@@ -203,6 +248,37 @@ class SftpManager {
         } else client.rm(path)
     }
 
+    private fun collectZipSources(
+        client: SFTPClient,
+        remotePath: String,
+        entryName: String,
+        output: MutableList<ZipSource>
+    ) {
+        require(output.size < MAX_DOWNLOAD_ENTRIES) {
+            "Terlalu banyak item untuk diunduh (maksimum " + MAX_DOWNLOAD_ENTRIES + ")"
+        }
+        val attrs = client.lstat(remotePath)
+        val directory = attrs.type == FileMode.Type.DIRECTORY
+        output += ZipSource(remotePath, entryName, directory)
+        if (!directory) return
+        client.ls(remotePath)
+            .filter { it.name != "." && it.name != ".." }
+            .forEach { child ->
+                collectZipSources(
+                    client,
+                    join(remotePath, child.name),
+                    entryName + "/" + safeZipSegment(child.name),
+                    output
+                )
+            }
+    }
+
+    private fun copyRemoteFile(client: SFTPClient, path: String, output: OutputStream) {
+        client.open(path).use { remote ->
+            remote.RemoteFileInputStream().use { input -> input.copyTo(output, DEFAULT_BUFFER_SIZE) }
+        }
+    }
+
     private fun sessionAlive(): Boolean = sftp != null && ssh?.isConnected == true && ssh?.isAuthenticated == true
 
     /**
@@ -210,7 +286,10 @@ class SftpManager {
      * terbukti benar, sesi dipulihkan sekali secara senyap sebelum operasi dijalankan —
      * user tidak perlu reconnect manual, dan Save tidak lagi gagal karena idle timeout.
      */
-    private fun <T> withClient(block: (SFTPClient) -> T): T = lock.withLock {
+    private fun <T> withClient(
+        retryOnDisconnect: Boolean = true,
+        block: (SFTPClient) -> T
+    ): T = lock.withLock {
         if (!sessionAlive()) {
             val config = lastConfig ?: error("Belum terhubung ke server")
             val recovered = runCatching { connect(config) }.getOrNull()
@@ -221,7 +300,7 @@ class SftpManager {
             block(client)
         } catch (error: Exception) {
             // Koneksi bisa mati tepat di tengah operasi: coba sekali lagi dengan sesi baru.
-            if (sessionAlive()) throw error
+            if (!retryOnDisconnect || sessionAlive()) throw error
             val config = lastConfig ?: throw error
             val recovered = runCatching { connect(config) }.getOrNull()
             if (recovered !is ConnectResult.Connected) throw error
@@ -238,6 +317,8 @@ class SftpManager {
     }
 
     companion object {
+        private const val MAX_DOWNLOAD_ENTRIES = 20_000
+
         /**
          * Ubah 9 bit izin POSIX menjadi "rwxr-xr-x". Sebelumnya nama enum yang dipakai,
          * sehingga kolom izin di UI tampil seperti "USR_RUSR_W…".
@@ -263,6 +344,13 @@ class SftpManager {
 
         fun validateName(name: String) {
             require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name) { "Nama tidak valid" }
+        }
+
+        private fun safeZipSegment(name: String): String {
+            val cleaned = name.map {
+                if (it.code < 32 || it.code == 47 || it.code == 92) "_" else it.toString()
+            }.joinToString("").take(255).ifBlank { "item" }
+            return if (cleaned == "." || cleaned == "..") "_" + cleaned else cleaned
         }
 
         private fun fingerprint(key: PublicKey): String {

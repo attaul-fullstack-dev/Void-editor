@@ -143,6 +143,30 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - `git diff --check` lolos.
 - PR: `#8 Add SFTP file and folder downloads`.
 
+## 2026-08-24 — Download dari bookmark folder lokal
+
+### Kebutuhan
+
+- Item di folder yang ditambahkan lewat `Tambah jalur` dapat di-download ke lokasi SAF lain.
+- Satu file disalin langsung, sedangkan satu folder atau multi-item otomatis menjadi ZIP.
+- Root bookmark juga dapat di-download langsung dari menu long-press bookmark.
+
+### Implementasi
+
+- Tambahkan mode multi-select, progress, serta aksi download pada explorer lokal.
+- Gunakan `ACTION_CREATE_DOCUMENT` agar pengguna memilih nama dan lokasi output.
+- Stream file langsung dari `ContentResolver` ke output tanpa menyalin seluruh file ke cache.
+- Traversal folder dilakukan depth-first sambil menulis `ZipOutputStream`; file tersembunyi tetap disertakan dan jumlah entry tidak dikumpulkan di memori.
+- Batasi pilihan awal ke 500 item dan kedalaman folder ke 256 level.
+- Bersihkan nama entry ZIP dari slash, backslash, karakter kontrol, `.` dan `..`.
+- Tombol Back membatalkan multi-select lokal sebelum melakukan navigasi folder.
+
+### Verifikasi dan referensi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- PR: `#8 Add SFTP file and folder downloads`.
+
 ## Build dan GitHub Actions
 
 - Repo tidak memiliki `gradlew`/Gradle wrapper dan environment lokal tidak memiliki Gradle.

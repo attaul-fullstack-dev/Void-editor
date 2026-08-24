@@ -26,7 +26,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import java.security.Security
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
@@ -65,6 +67,28 @@ class MainActivity : AppCompatActivity() {
     )
 
     private var pendingSftpDownload: PendingSftpDownload? = null
+
+    private data class LocalDownloadItem(
+        val name: String,
+        val uri: Uri,
+        val directory: Boolean,
+        val mime: String?
+    )
+
+    private data class LocalDocumentChild(
+        val name: String,
+        val uri: Uri,
+        val directory: Boolean
+    )
+
+    private data class PendingLocalDownload(
+        val requestId: String,
+        val items: List<LocalDownloadItem>,
+        val archive: Boolean,
+        val fileName: String
+    )
+
+    private var pendingLocalDownload: PendingLocalDownload? = null
 
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -131,6 +155,26 @@ class MainActivity : AppCompatActivity() {
             )
         } catch (_: Exception) {}
         performSftpDownload(pending, uri)
+    }
+
+    private val localDownloadFileLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val pending = pendingLocalDownload
+        pendingLocalDownload = null
+        if (pending == null) return@registerForActivityResult
+        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        if (uri == null) {
+            emitResult(pending.requestId, "localDownload", false, null, "Download dibatalkan")
+            return@registerForActivityResult
+        }
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
+        performLocalDownload(pending, uri)
     }
 
     // Fitur E: pemilih FOLDER (bukan file). Izin dipertahankan agar tetap bisa dibaca
@@ -456,6 +500,13 @@ class MainActivity : AppCompatActivity() {
             .take(120)
             .ifBlank { fallback }
 
+    private fun safeLocalZipSegment(raw: String): String {
+        val cleaned = raw.map {
+            if (it.code < 32 || it.code == 47 || it.code == 92) "_" else it.toString()
+        }.joinToString("").take(255).ifBlank { "item" }
+        return if (cleaned == "." || cleaned == "..") "_" + cleaned else cleaned
+    }
+
     private fun extensionOf(name: String) = name.substringAfterLast('.', "").lowercase()
 
     private fun isImage(name: String, mime: String?): Boolean =
@@ -599,6 +650,138 @@ class MainActivity : AppCompatActivity() {
                 stream.flush()
             }
         } ?: error("Lokasi download tidak dapat ditulis")
+    }
+
+    private fun listLocalDownloadChildren(parent: Uri): List<LocalDocumentChild> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parent, documentIdOf(parent))
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+        val children = mutableListOf<LocalDocumentChild>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val documentId = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: documentId.substringAfterLast("/")
+                val mime = cursor.getString(2)
+                children += LocalDocumentChild(
+                    name = name,
+                    uri = DocumentsContract.buildDocumentUriUsingTree(parent, documentId),
+                    directory = mime == DocumentsContract.Document.MIME_TYPE_DIR
+                )
+            }
+        } ?: error("Isi folder lokal tidak dapat dibaca")
+        return children
+    }
+
+    private fun copyLocalDocument(uri: Uri, output: java.io.OutputStream) {
+        contentResolver.openInputStream(uri)?.use { input ->
+            input.copyTo(output, DEFAULT_BUFFER_SIZE)
+        } ?: error("File lokal tidak dapat dibaca")
+    }
+
+    private fun writeLocalZipSource(
+        uri: Uri,
+        entryName: String,
+        directoryHint: Boolean?,
+        zip: ZipOutputStream,
+        depth: Int,
+        onEntry: (String, Boolean) -> Unit
+    ) {
+        require(depth <= MAX_LOCAL_DOWNLOAD_DEPTH) { "Folder terlalu dalam untuk dijadikan ZIP" }
+        val directory = directoryHint
+            ?: (contentResolver.getType(uri) == DocumentsContract.Document.MIME_TYPE_DIR)
+        val zipName = if (directory) entryName.removeSuffix("/") + "/" else entryName
+        onEntry(zipName, false)
+        zip.putNextEntry(ZipEntry(zipName))
+        if (!directory) copyLocalDocument(uri, zip)
+        zip.closeEntry()
+        onEntry(zipName, true)
+        if (!directory) return
+        listLocalDownloadChildren(uri).forEach { child ->
+            writeLocalZipSource(
+                uri = child.uri,
+                entryName = entryName + "/" + safeLocalZipSegment(child.name),
+                directoryHint = child.directory,
+                zip = zip,
+                depth = depth + 1,
+                onEntry = onEntry
+            )
+        }
+    }
+
+    private fun performLocalDownload(pending: PendingLocalDownload, uri: Uri) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    var lastProgressAt = 0L
+                    writeDownloadToUri(uri) { output ->
+                        if (pending.archive) {
+                            var completed = 0
+                            ZipOutputStream(output.buffered()).use { zip ->
+                                pending.items.forEach { item ->
+                                    writeLocalZipSource(
+                                        uri = item.uri,
+                                        entryName = safeLocalZipSegment(item.name),
+                                        directoryHint = item.directory,
+                                        zip = zip,
+                                        depth = 0,
+                                        onEntry = { label, finished ->
+                                            if (finished) completed += 1
+                                            val now = System.currentTimeMillis()
+                                            if (lastProgressAt == 0L || now - lastProgressAt >= 250L) {
+                                                lastProgressAt = now
+                                                emitProgress(
+                                                    pending.requestId,
+                                                    completed,
+                                                    0,
+                                                    label,
+                                                    "localDownload"
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            emitProgress(
+                                pending.requestId,
+                                completed,
+                                completed,
+                                "Selesai",
+                                "localDownload"
+                            )
+                        } else {
+                            emitProgress(pending.requestId, 0, 1, pending.fileName, "localDownload")
+                            copyLocalDocument(pending.items.single().uri, output)
+                            emitProgress(pending.requestId, 1, 1, pending.fileName, "localDownload")
+                        }
+                    }
+                }
+            }
+            emitProgress(pending.requestId, 0, 0, "", "localDownload", finished = true)
+            result.fold(
+                onSuccess = {
+                    toast("Download tersimpan: " + pending.fileName)
+                    emitResult(
+                        pending.requestId,
+                        "localDownload",
+                        true,
+                        JSONObject().put("name", pending.fileName).put("archive", pending.archive),
+                        null
+                    )
+                },
+                onFailure = {
+                    emitResult(
+                        pending.requestId,
+                        "localDownload",
+                        false,
+                        null,
+                        it.message ?: "Download lokal gagal"
+                    )
+                }
+            )
+        }
     }
 
     private fun performSftpDownload(pending: PendingSftpDownload, uri: Uri) {
@@ -1202,6 +1385,64 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun localDownload(requestId: String, itemsJson: String, archiveName: String) {
+            val parsed = runCatching {
+                val array = JSONArray(itemsJson)
+                require(array.length() in 1..500) { "Pilih antara 1 sampai 500 item" }
+                (0 until array.length()).map { index ->
+                    val item = array.getJSONObject(index)
+                    val uri = Uri.parse(item.getString("uri"))
+                    require(uri.scheme == "content") { "URI download lokal tidak valid" }
+                    LocalDownloadItem(
+                        name = safeSuggestedName(item.optString("name"), "item"),
+                        uri = uri,
+                        directory = item.optBoolean("directory", false),
+                        mime = item.optString("mime").ifBlank { null }
+                    )
+                }
+            }
+            if (parsed.isFailure) {
+                emitResult(
+                    requestId,
+                    "localDownload",
+                    false,
+                    null,
+                    parsed.exceptionOrNull()?.message ?: "Pilihan download lokal tidak valid"
+                )
+                return
+            }
+            val items = parsed.getOrThrow()
+            val archive = items.size > 1 || items.single().directory
+            val suggestedName = if (archive) {
+                val base = safeSuggestedName(archiveName.removeSuffix(".zip"), "voidedit-local-download")
+                base + ".zip"
+            } else items.single().name
+            runOnUiThread {
+                if (pendingLocalDownload != null) {
+                    emitResult(requestId, "localDownload", false, null, "Pemilih lokasi download masih terbuka")
+                    return@runOnUiThread
+                }
+                pendingLocalDownload = PendingLocalDownload(requestId, items, archive, suggestedName)
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = if (archive) "application/zip"
+                        else items.single().mime ?: "application/octet-stream"
+                    putExtra(Intent.EXTRA_TITLE, suggestedName)
+                }
+                runCatching { localDownloadFileLauncher.launch(intent) }.onFailure { error ->
+                    pendingLocalDownload = null
+                    emitResult(
+                        requestId,
+                        "localDownload",
+                        false,
+                        null,
+                        error.message ?: "Pemilih lokasi download tidak tersedia"
+                    )
+                }
+            }
+        }
+
+        @JavascriptInterface
         fun localUpload(requestId: String, parentUri: String) {
             runOnUiThread {
                 pickCallback = { source ->
@@ -1353,6 +1594,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     private companion object {
+        const val MAX_LOCAL_DOWNLOAD_DEPTH = 256
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico")
 
         /** requestId tetap untuk hasil Save — WebView mendaftarkan handler dengan id ini. */

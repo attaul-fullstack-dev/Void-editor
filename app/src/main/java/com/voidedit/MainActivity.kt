@@ -900,7 +900,10 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun deleteConnection(id: String): String = wrapSync {
-            connectionStore.delete(id); JSONObject().put("id", id)
+            val saved = connectionStore.get(id) ?: error("Koneksi tersimpan tidak ditemukan")
+            connectionStore.delete(id)
+            prefs.edit().remove(hostKeyPref(saved.host, saved.port)).apply()
+            JSONObject().put("id", id).put("fingerprintCleared", true)
         }
 
         /** Connect memakai kredensial tersimpan — password tidak pernah dikirim ke WebView. */

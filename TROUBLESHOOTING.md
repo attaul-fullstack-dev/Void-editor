@@ -197,3 +197,31 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - PR #5 memperbaiki seluruh aksi tulis SAF di root bookmark dan sudah di-merge.
 - PR #6 memperbaiki recursive folder deletion dan sudah di-merge.
 - PR #7 menambahkan fitur hapus koneksi serta fingerprint dari commit `c557c7a` dan sudah di-merge.
+
+## 2026-08-24 - Download berhenti ketika UI aplikasi ditutup
+
+### Gejala
+
+- Download folder besar bergantung pada `MainActivity`.
+- Menutup aplikasi menjalankan `scope.cancel()`, sehingga transfer dapat berhenti dan meninggalkan output ZIP parsial.
+- Tidak ada notifikasi sistem atau tombol batal ketika aplikasi berada di background.
+
+### Penyebab
+
+Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizinkan tetap aktif untuk pekerjaan panjang. Operasi stream juga belum memeriksa cancellation pada setiap chunk.
+
+### Solusi
+
+- Pindahkan download SFTP dan lokal ke `DownloadService` dengan foreground service type `dataSync`.
+- Tampilkan notifikasi progress yang tetap ada saat UI ditutup, lengkap dengan tombol `Batal`.
+- Minta izin notifikasi pada Android 13+ saat download pertama, tetapi transfer tetap dapat dimulai bila izin ditolak.
+- Kirim event progress dan hasil kembali ke WebView selama Activity masih hidup.
+- Periksa cancellation pada setiap chunk file dan setiap langkah traversal ZIP.
+- Hapus output SAF parsial saat transfer gagal atau dibatalkan; jika provider menolak delete, truncate output menjadi kosong.
+- Foreground service memakai `START_NOT_STICKY`: force stop, reboot, atau process kill tetap menghentikan transfer dan tidak menyimpan kredensial untuk auto-resume.
+
+### Verifikasi
+
+- `git diff --check` lolos.
+- Build lokal tidak tersedia karena repo tidak membawa Gradle wrapper; compile diverifikasi lewat GitHub Actions.
+- Branch: `feat/foreground-download-service`.

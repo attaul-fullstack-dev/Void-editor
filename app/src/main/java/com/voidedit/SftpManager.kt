@@ -196,8 +196,12 @@ class SftpManager {
     }
 
     /** Stream satu file remote langsung ke output SAF tanpa memuat seluruh file ke memori. */
-    fun downloadFile(path: String, output: OutputStream) = withClient(retryOnDisconnect = false) { client ->
-        copyRemoteFile(client, normalize(path), output)
+    fun downloadFile(
+        path: String,
+        output: OutputStream,
+        checkCancelled: () -> Unit = {}
+    ) = withClient(retryOnDisconnect = false) { client ->
+        copyRemoteFile(client, normalize(path), output, checkCancelled)
     }
 
     /**
@@ -208,18 +212,21 @@ class SftpManager {
     fun downloadZip(
         items: List<DownloadItem>,
         output: OutputStream,
+        checkCancelled: () -> Unit = {},
         onProgress: (Int, Int, String) -> Unit
     ) = withClient(retryOnDisconnect = false) { client ->
         require(items.isNotEmpty()) { "Tidak ada item yang dipilih" }
         var completed = 0
         ZipOutputStream(output.buffered()).use { zip ->
             items.forEach { item ->
+                checkCancelled()
                 writeZipSource(
                     client = client,
                     remotePath = normalize(item.path),
                     entryName = safeZipSegment(item.name),
                     zip = zip,
                     depth = 0,
+                    checkCancelled = checkCancelled,
                     onEntry = { label, finished ->
                         if (finished) completed += 1
                         onProgress(completed, 0, label)
@@ -257,20 +264,23 @@ class SftpManager {
         zip: ZipOutputStream,
         depth: Int,
         directoryHint: Boolean? = null,
+        checkCancelled: () -> Unit = {},
         onEntry: (String, Boolean) -> Unit
     ) {
+        checkCancelled()
         require(depth <= MAX_DOWNLOAD_DEPTH) { "Folder terlalu dalam untuk dijadikan ZIP" }
         val directory = directoryHint ?: (client.lstat(remotePath).type == FileMode.Type.DIRECTORY)
         val zipName = if (directory) entryName.removeSuffix("/") + "/" else entryName
         onEntry(zipName, false)
         zip.putNextEntry(ZipEntry(zipName))
-        if (!directory) copyRemoteFile(client, remotePath, zip)
+        if (!directory) copyRemoteFile(client, remotePath, zip, checkCancelled)
         zip.closeEntry()
         onEntry(zipName, true)
         if (!directory) return
         client.ls(remotePath)
             .filter { it.name != "." && it.name != ".." }
             .forEach { child ->
+                checkCancelled()
                 writeZipSource(
                     client,
                     join(remotePath, child.name),
@@ -278,14 +288,28 @@ class SftpManager {
                     zip,
                     depth + 1,
                     child.attributes.type == FileMode.Type.DIRECTORY,
+                    checkCancelled,
                     onEntry
                 )
             }
     }
 
-    private fun copyRemoteFile(client: SFTPClient, path: String, output: OutputStream) {
+    private fun copyRemoteFile(
+        client: SFTPClient,
+        path: String,
+        output: OutputStream,
+        checkCancelled: () -> Unit
+    ) {
         client.open(path).use { remote ->
-            remote.RemoteFileInputStream().use { input -> input.copyTo(output, DEFAULT_BUFFER_SIZE) }
+            remote.RemoteFileInputStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    checkCancelled()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+            }
         }
     }
 

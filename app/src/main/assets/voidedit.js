@@ -1069,7 +1069,11 @@ const sftpBreadcrumb = document.getElementById('sftp-breadcrumb');
 const sftpPathLabel = document.getElementById('sftp-path-label');
 const sftpServerLabel = document.getElementById('sftp-server-label');
 const sftpActionMenu = document.getElementById('sftp-action-menu');
-const localActionMenu = document.getElementById('local-action-menu');
+const localActionMenu = document.getElementById("local-action-menu");
+const localProgressEl = document.getElementById("local-progress");
+const localSelectionBar = document.getElementById("local-selection-bar");
+const localSelectionCount = document.getElementById("local-selection-count");
+const localFab = document.getElementById("local-fab");
 const sftpProgressEl = document.getElementById('sftp-progress');
 const sftpSelectionBar = document.getElementById('sftp-selection-bar');
 const sftpSelectionCount = document.getElementById('sftp-selection-count');
@@ -1087,6 +1091,8 @@ const pendingRequests = new Map();  // requestId -> {resolve, reject}
 let requestSeq = 0;
 let currentSftpEntries = [];
 const selectedSftpEntries = new Map();
+let currentLocalEntries = [];
+const selectedLocalEntries = new Map();
 
 const settings = { sortAscending: true, showHidden: false, autoList: true };
 
@@ -1122,10 +1128,20 @@ window.onSftpResult = function (payload) {
 };
 
 window.onSftpProgress = function (payload) {
-  sftpProgressEl.classList.add('visible');
-  const verb = payload.operation === "download" ? "Mengunduh" : "Mengunggah";
-  sftpProgressEl.textContent = verb + " " + payload.done + "/" + payload.total + " — " + payload.label;
-  if (payload.done >= payload.total) setTimeout(() => sftpProgressEl.classList.remove('visible'), 1200);
+  const progressEl = payload.operation === "localDownload" ? localProgressEl : sftpProgressEl;
+  if (payload.finished) {
+    progressEl.classList.remove("visible");
+    progressEl.textContent = "";
+    return;
+  }
+  progressEl.classList.add("visible");
+  const downloading = payload.operation === "download" || payload.operation === "localDownload";
+  const verb = downloading ? "Mengunduh" : "Mengunggah";
+  const count = payload.total > 0 ? payload.done + "/" + payload.total : payload.done + " item";
+  progressEl.textContent = verb + " " + count + " — " + payload.label;
+  if (payload.total > 0 && payload.done >= payload.total) {
+    setTimeout(() => progressEl.classList.remove("visible"), 1200);
+  }
 };
 
 function openSftpPanel() {
@@ -1135,7 +1151,7 @@ function openSftpPanel() {
   if (sftpConnected) showExplorerView('sftp');
   else { showExplorerView('home'); renderExplorerHome(); }
 }
-function closeSftpPanel() { sftpPanel.classList.remove('open'); closeSftpActions(); closeLocalActions(); clearSftpSelection(false); }
+function closeSftpPanel() { sftpPanel.classList.remove("open"); closeSftpActions(); closeLocalActions(); clearSftpSelection(false); clearLocalSelection(false); }
 
 /* ══════════ HUB PENJELAJAH BERKAS (Fitur A / C / E) ══════════ */
 const explorerHome = document.getElementById('explorer-home');
@@ -1153,7 +1169,8 @@ let localBookmarkLabel = '';
 
 function showExplorerView(view) {
   explorerView = view;
-  if (view !== 'sftp') clearSftpSelection(false);
+  if (view !== "sftp") clearSftpSelection(false);
+  if (view !== "local") clearLocalSelection(false);
   explorerHome.classList.toggle('visible', view === 'home');
   sftpConnectView.style.display = view === 'connect' ? '' : 'none';
   sftpBrowser.classList.toggle('visible', view === 'sftp');
@@ -1183,7 +1200,8 @@ function parentDirOf(path) {
 // Di browser SFTP, Back naik 1 level folder dulu (pakai koneksi yang masih terbuka, tanpa
 // reconnect); baru setelah di root/home keluar ke hub. Sesi SFTP TIDAK diputus.
 function explorerBack() {
-  if (explorerView === 'sftp' && selectedSftpEntries.size) { clearSftpSelection(); return; }
+  if (explorerView === "sftp" && selectedSftpEntries.size) { clearSftpSelection(); return; }
+  if (explorerView === "local" && selectedLocalEntries.size) { clearLocalSelection(); return; }
   if (explorerView === 'local' && localStack.length > 1) { localGoUp(); return; }
   if (explorerView === 'sftp' && sftpConnected) {
     const atRoot = currentDir === '/' || currentDir === sftpHomeDir;
@@ -1484,6 +1502,20 @@ function openBookmarkMenu(item) {
   document.getElementById('bookmark-item-dialog').showModal();
 }
 
+function downloadBookmark() {
+  document.getElementById("bookmark-item-dialog").close();
+  if (!selectedBookmark) return;
+  const target = selectedBookmark;
+  selectedBookmark = null;
+  openBookmark(target);
+  startLocalDownload([{
+    name: target.label,
+    uri: target.treeUri,
+    directory: true,
+    mime: "vnd.android.document/directory"
+  }]);
+}
+
 function renameBookmark() {
   document.getElementById('bookmark-item-dialog').close();
   if (!selectedBookmark) return;
@@ -1540,6 +1572,7 @@ function submitLabel(event) {
 
 // localStack menyimpan jejak navigasi: [{uri, label}, …]. Elemen terakhir = folder aktif.
 function openBookmark(item) {
+  clearLocalSelection(false);
   localBookmarkLabel = item.label;
   localStack = [{ uri: item.treeUri, label: item.label }];
   showExplorerView('local');
@@ -1547,6 +1580,7 @@ function openBookmark(item) {
 }
 
 function localGoUp() {
+  clearLocalSelection(false);
   if (localStack.length > 1) {
     localStack.pop();
     loadLocalList();
@@ -1582,29 +1616,96 @@ async function loadLocalList() {
   }
 }
 
+function updateLocalSelectionUi() {
+  const count = selectedLocalEntries.size;
+  localSelectionBar.hidden = count === 0;
+  localSelectionCount.textContent = count + " dipilih";
+  localFab.style.display = count ? "none" : "";
+}
+
+function clearLocalSelection(rerender = true) {
+  selectedLocalEntries.clear();
+  updateLocalSelectionUi();
+  if (rerender) renderLocalEntries(currentLocalEntries);
+}
+
+function toggleLocalSelection(entry) {
+  if (selectedLocalEntries.has(entry.uri)) selectedLocalEntries.delete(entry.uri);
+  else selectedLocalEntries.set(entry.uri, entry);
+  updateLocalSelectionUi();
+  renderLocalEntries(currentLocalEntries);
+}
+
+function localArchiveName(items) {
+  if (items.length === 1 && items[0].directory) return items[0].name;
+  const current = localStack[localStack.length - 1];
+  return ((current && current.label) || localBookmarkLabel || "local") + "-download";
+}
+
+async function startLocalDownload(items) {
+  if (!items.length) return;
+  if (!bridge.localDownload) { sftpToast("Fitur download lokal butuh versi aplikasi terbaru"); return; }
+  const payload = items.map((item) => ({
+    name: item.name,
+    uri: item.uri,
+    directory: !!item.directory,
+    mime: item.mime || ""
+  }));
+  const archive = items.length > 1 || !!items[0].directory;
+  sftpToast(archive ? "Menyiapkan ZIP lokal…" : "Menyiapkan download lokal…");
+  try {
+    const result = await callBridge(null, (id) =>
+      bridge.localDownload(id, JSON.stringify(payload), localArchiveName(items))
+    );
+    sftpToast("Tersimpan: " + (result.name || "download"));
+    clearLocalSelection(explorerView === "local");
+  } catch (err) {
+    sftpToast(err.message);
+  }
+}
+
+function downloadLocalSelection() {
+  startLocalDownload(Array.from(selectedLocalEntries.values()));
+}
+
 function renderLocalEntries(entries) {
-  const list = document.getElementById('local-list');
-  list.innerHTML = '';
-  if (!entries.length) { renderLocalState('Folder kosong'); return; }
+  currentLocalEntries = Array.isArray(entries) ? entries : [];
+  const visibleUris = new Set(currentLocalEntries.map((entry) => entry.uri));
+  Array.from(selectedLocalEntries.keys()).forEach((uri) => {
+    if (!visibleUris.has(uri)) selectedLocalEntries.delete(uri);
+  });
+  updateLocalSelectionUi();
+  const list = document.getElementById("local-list");
+  list.innerHTML = "";
+  if (!entries.length) { renderLocalState("Folder kosong"); return; }
   entries.forEach((entry) => {
-    const ext = (entry.name.split('.').pop() || '').slice(0, 3).toUpperCase();
+    const ext = (entry.name.split(".").pop() || "").slice(0, 3).toUpperCase();
     const isImg = !entry.directory && isImageName(entry.name);
-    list.appendChild(makeRow({
-      icon: entry.directory ? 'DIR' : (isImg ? 'IMG' : (ext || 'TXT')),
+    const selected = selectedLocalEntries.has(entry.uri);
+    const row = makeRow({
+      icon: selected ? "✓" : (entry.directory ? "DIR" : (isImg ? "IMG" : (ext || "TXT"))),
       title: entry.name,
       meta: entry.directory
-        ? 'Folder'
-        : `${formatBytes(entry.size)} · ${entry.modified ? new Date(entry.modified).toLocaleDateString('id-ID') : '—'}`,
+        ? "Folder"
+        : formatBytes(entry.size) + " · " + (entry.modified ? new Date(entry.modified).toLocaleDateString("id-ID") : "—"),
       onTap: () => {
+        if (selectedLocalEntries.size) { toggleLocalSelection(entry); return; }
         if (entry.directory) {
+          clearLocalSelection(false);
           localStack.push({ uri: entry.uri, label: entry.name });
           loadLocalList();
         } else {
           openLocalFile(entry);
         }
       },
-      onLongPress: () => openLocalItemMenu(entry)
-    }));
+      onLongPress: () => {
+        if (selectedLocalEntries.size) toggleLocalSelection(entry);
+        else openLocalItemMenu(entry);
+      }
+    });
+    row.classList.toggle("selected", selected);
+    row.setAttribute("aria-pressed", String(selected));
+    list.appendChild(row);
   });
 }
 
@@ -1623,8 +1724,9 @@ function closeLocalActions() { localActionMenu.classList.remove('open'); }
 function openLocalItemMenu(entry) {
   selectedEntry = entry;
   selectedEntrySource = 'local';
-  document.getElementById('sftp-item-download').hidden = true;
-  document.getElementById('sftp-item-select').hidden = true;
+  document.getElementById("sftp-item-download").hidden = false;
+  document.getElementById("sftp-item-select").hidden = false;
+  document.getElementById("item-copy-uri").textContent = "Salin URI lokal";
   document.getElementById('sftp-item-title').textContent = entry.name;
   document.getElementById('sftp-item-path').textContent = decodeURIComponent(entry.uri);
   document.getElementById('sftp-item-dialog').showModal();
@@ -1848,11 +1950,14 @@ function toggleSftpSelection(entry) {
   renderEntries(currentSftpEntries);
 }
 
-function selectCurrentSftpItem() {
+function selectCurrentItem() {
   document.getElementById("sftp-item-dialog").close();
-  if (!selectedEntry || selectedEntrySource !== "sftp") return;
-  toggleSftpSelection(selectedEntry);
+  if (!selectedEntry) return;
+  const entry = selectedEntry;
+  const source = selectedEntrySource;
   selectedEntry = null;
+  if (source === "local") toggleLocalSelection(entry);
+  else toggleSftpSelection(entry);
 }
 
 function archiveNameFor(items) {
@@ -1888,10 +1993,12 @@ function downloadSftpSelection() {
 
 function downloadSelectedItem() {
   document.getElementById("sftp-item-dialog").close();
-  if (!selectedEntry || selectedEntrySource !== "sftp") return;
+  if (!selectedEntry) return;
   const target = selectedEntry;
+  const source = selectedEntrySource;
   selectedEntry = null;
-  startSftpDownload([target]);
+  if (source === "local") startLocalDownload([target]);
+  else startSftpDownload([target]);
 }
 
 function renderEntries(entries) {
@@ -2034,6 +2141,7 @@ function openItemMenu(entry) {
   selectedEntrySource = 'sftp';
   document.getElementById('sftp-item-download').hidden = false;
   document.getElementById('sftp-item-select').hidden = false;
+  document.getElementById("item-copy-uri").textContent = "Salin URI SFTP";
   document.getElementById('sftp-item-title').textContent = entry.name;
   document.getElementById('sftp-item-path').textContent = entry.path;
   document.getElementById('sftp-item-dialog').showModal();

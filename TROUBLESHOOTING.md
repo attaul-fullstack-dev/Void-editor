@@ -101,9 +101,10 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - Tombol Back membatalkan mode pilihan lebih dahulu dan tombol tambah disembunyikan selama pilihan aktif.
 - Tambahkan bridge `sftpDownload` dan launcher `ACTION_CREATE_DOCUMENT` agar pengguna menentukan nama serta lokasi hasil.
 - Single file dialirkan langsung dari SSHJ ke SAF tanpa memuat seluruh file ke memori.
-- Folder dan multi-item dilisting rekursif lalu dialirkan ke `ZipOutputStream`; folder kosong dan file tersembunyi tetap disertakan, symlink tidak diikuti sebagai direktori.
-- Batasi pilihan awal ke 500 item dan hasil traversal ke 20.000 entry.
+- Folder dan multi-item ditraversal sambil langsung dialirkan ke `ZipOutputStream`; folder kosong dan file tersembunyi tetap disertakan, symlink tidak diikuti sebagai direktori.
+- Batasi pilihan awal ke 500 item dan kedalaman folder ke 256 level; jumlah entry hasil traversal tidak dibatasi di memori.
 - Nonaktifkan retry otomatis untuk operasi streaming agar kegagalan koneksi di tengah proses tidak menulis ulang data ke output yang sama.
+- Gunakan koneksi SFTP khusus untuk download agar transfer besar tidak memblokir listing dan aksi explorer.
 - Bersihkan nama entry ZIP dari slash, backslash, karakter kontrol, `.` dan `..`.
 
 ### Verifikasi
@@ -112,6 +113,58 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - `git diff --check` lolos.
 - Build lokal tidak tersedia karena repo tidak membawa wrapper; kompilasi Android diverifikasi oleh GitHub Actions setelah perubahan masuk ke branch yang memicu workflow.
 - Commit implementasi: `e2f4b21 Add SFTP download selection`.
+- PR: `#8 Add SFTP file and folder downloads`.
+
+## 2026-08-24 — Download folder besar diam lalu explorer SFTP macet
+
+### Gejala
+
+- Download folder project besar tidak menampilkan progress selama beberapa menit.
+- Selama proses itu listing explorer SFTP hanya menampilkan loading.
+- Operasi akhirnya gagal karena jumlah item melewati batas maksimum traversal.
+
+### Penyebab
+
+- Implementasi awal mengumpulkan seluruh tree remote ke list di memori sebelum satu byte ZIP ditulis.
+- Traversal menjalankan `lstat` tambahan untuk setiap child dan berhenti pada batas 20.000 entry.
+- Download memakai koneksi serta lock SFTP yang sama dengan explorer, sehingga request listing menunggu transfer selesai.
+
+### Solusi
+
+- Tulis entry ZIP langsung saat traversal depth-first; tidak lagi mengumpulkan seluruh tree atau membatasi jumlah entry di memori.
+- Gunakan attribute dari hasil `ls` untuk menghindari round-trip `lstat` per child.
+- Jalankan download lewat koneksi SFTP terpisah dengan config terautentikasi yang sama, sehingga explorer tetap responsif.
+- Kirim progress sejak entry pertama dengan total dinamis dan throttle sekitar empat update per detik agar WebView tidak dibanjiri event.
+- Pertahankan batas kedalaman 256 level sebagai perlindungan terhadap tree abnormal.
+
+### Verifikasi dan referensi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- PR: `#8 Add SFTP file and folder downloads`.
+
+## 2026-08-24 — Download dari bookmark folder lokal
+
+### Kebutuhan
+
+- Item di folder yang ditambahkan lewat `Tambah jalur` dapat di-download ke lokasi SAF lain.
+- Satu file disalin langsung, sedangkan satu folder atau multi-item otomatis menjadi ZIP.
+- Root bookmark juga dapat di-download langsung dari menu long-press bookmark.
+
+### Implementasi
+
+- Tambahkan mode multi-select, progress, serta aksi download pada explorer lokal.
+- Gunakan `ACTION_CREATE_DOCUMENT` agar pengguna memilih nama dan lokasi output.
+- Stream file langsung dari `ContentResolver` ke output tanpa menyalin seluruh file ke cache.
+- Traversal folder dilakukan depth-first sambil menulis `ZipOutputStream`; file tersembunyi tetap disertakan dan jumlah entry tidak dikumpulkan di memori.
+- Batasi pilihan awal ke 500 item dan kedalaman folder ke 256 level.
+- Bersihkan nama entry ZIP dari slash, backslash, karakter kontrol, `.` dan `..`.
+- Tombol Back membatalkan multi-select lokal sebelum melakukan navigasi folder.
+
+### Verifikasi dan referensi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
 - PR: `#8 Add SFTP file and folder downloads`.
 
 ## Build dan GitHub Actions

@@ -887,9 +887,9 @@
   .crumb { flex: 0 0 auto; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); padding: 6px 7px; font-size: 13px; cursor: pointer; }
   .crumb:last-child { color: var(--teal); background: var(--teal-dim); }
   #sftp-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
-  #sftp-selection-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); }
-  #sftp-selection-bar[hidden] { display: none; }
-  #sftp-selection-count { flex: 1; color: var(--teal); font-size: 12px; font-weight: 700; }
+  #sftp-selection-bar, #local-selection-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); }
+  #sftp-selection-bar[hidden], #local-selection-bar[hidden] { display: none; }
+  #sftp-selection-count, #local-selection-count { flex: 1; color: var(--teal); font-size: 12px; font-weight: 700; }
   .selection-action { min-height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; cursor: pointer; }
   .selection-action.primary { border-color: transparent; background: var(--teal); color: var(--bg-base); }
   #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -908,8 +908,8 @@
   #sftp-action-menu.open, #local-action-menu.open { display: flex; flex-direction: column; }
   .menu-action { border: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 11px; border-radius: 8px; font-size: 14px; cursor: pointer; }
   .menu-action:active { background: var(--bg-elevated); }
-  #sftp-progress { display: none; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }
-  #sftp-progress.visible { display: block; }
+  #sftp-progress, #local-progress { display: none; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; }
+  #sftp-progress.visible, #local-progress.visible { display: block; }
   #sftp-toast { position: fixed; left: 50%; bottom: 22px; z-index: 100; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 9px; background: var(--text-primary); color: var(--bg-base); font-size: 13px; transition: .2s; }
   #sftp-toast.visible { transform: translate(-50%, 0); opacity: 1; }
   .sftp-dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--bg-surface); color: var(--text-primary); width: min(360px, calc(100% - 28px)); padding: 0; margin: auto; }

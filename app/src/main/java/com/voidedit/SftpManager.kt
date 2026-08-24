@@ -42,12 +42,6 @@ class SftpManager {
         val directory: Boolean
     )
 
-    private data class ZipSource(
-        val remotePath: String,
-        val entryName: String,
-        val directory: Boolean
-    )
-
     sealed class ConnectResult {
         data class Connected(val home: String) : ConnectResult()
         data class HostKeyRequired(val fingerprint: String) : ConnectResult()
@@ -64,6 +58,9 @@ class SftpManager {
      * mengedit beberapa menit, sesi mati, lalu tulis ditolak "Koneksi SFTP terputus").
      */
     private var lastConfig: Config? = null
+
+    /** Salinan config terautentikasi untuk koneksi transfer terpisah. */
+    fun authenticatedConfig(): Config? = lock.withLock { lastConfig?.copy() }
 
     fun connect(config: Config): ConnectResult = lock.withLock {
         disconnectLocked()
@@ -204,8 +201,9 @@ class SftpManager {
     }
 
     /**
-     * Stream pilihan remote sebagai ZIP. Listing dilakukan lebih dulu agar progress memiliki
-     * total yang stabil. Hidden file tetap disertakan dan symlink tidak diikuti sebagai folder.
+     * Stream pilihan remote sebagai ZIP sambil traversal. Tidak ada daftar seluruh tree di
+     * memori, sehingga folder besar langsung menghasilkan output. Hidden file tetap disertakan
+     * dan symlink tidak diikuti sebagai folder.
      */
     fun downloadZip(
         items: List<DownloadItem>,
@@ -213,19 +211,23 @@ class SftpManager {
         onProgress: (Int, Int, String) -> Unit
     ) = withClient(retryOnDisconnect = false) { client ->
         require(items.isNotEmpty()) { "Tidak ada item yang dipilih" }
-        val sources = mutableListOf<ZipSource>()
-        items.forEach { item ->
-            collectZipSources(client, normalize(item.path), safeZipSegment(item.name), sources)
-        }
+        var completed = 0
         ZipOutputStream(output.buffered()).use { zip ->
-            sources.forEachIndexed { index, source ->
-                val entryName = if (source.directory) source.entryName.removeSuffix("/") + "/" else source.entryName
-                zip.putNextEntry(ZipEntry(entryName))
-                if (!source.directory) copyRemoteFile(client, source.remotePath, zip)
-                zip.closeEntry()
-                onProgress(index + 1, sources.size, entryName)
+            items.forEach { item ->
+                writeZipSource(
+                    client = client,
+                    remotePath = normalize(item.path),
+                    entryName = safeZipSegment(item.name),
+                    zip = zip,
+                    depth = 0,
+                    onEntry = { label, finished ->
+                        if (finished) completed += 1
+                        onProgress(completed, 0, label)
+                    }
+                )
             }
         }
+        onProgress(completed, completed, "Selesai")
     }
 
     /** Putus eksplisit oleh user: kredensial pemulihan dibuang agar tidak reconnect senyap. */
@@ -248,27 +250,35 @@ class SftpManager {
         } else client.rm(path)
     }
 
-    private fun collectZipSources(
+    private fun writeZipSource(
         client: SFTPClient,
         remotePath: String,
         entryName: String,
-        output: MutableList<ZipSource>
+        zip: ZipOutputStream,
+        depth: Int,
+        directoryHint: Boolean? = null,
+        onEntry: (String, Boolean) -> Unit
     ) {
-        require(output.size < MAX_DOWNLOAD_ENTRIES) {
-            "Terlalu banyak item untuk diunduh (maksimum " + MAX_DOWNLOAD_ENTRIES + ")"
-        }
-        val attrs = client.lstat(remotePath)
-        val directory = attrs.type == FileMode.Type.DIRECTORY
-        output += ZipSource(remotePath, entryName, directory)
+        require(depth <= MAX_DOWNLOAD_DEPTH) { "Folder terlalu dalam untuk dijadikan ZIP" }
+        val directory = directoryHint ?: (client.lstat(remotePath).type == FileMode.Type.DIRECTORY)
+        val zipName = if (directory) entryName.removeSuffix("/") + "/" else entryName
+        onEntry(zipName, false)
+        zip.putNextEntry(ZipEntry(zipName))
+        if (!directory) copyRemoteFile(client, remotePath, zip)
+        zip.closeEntry()
+        onEntry(zipName, true)
         if (!directory) return
         client.ls(remotePath)
             .filter { it.name != "." && it.name != ".." }
             .forEach { child ->
-                collectZipSources(
+                writeZipSource(
                     client,
                     join(remotePath, child.name),
                     entryName + "/" + safeZipSegment(child.name),
-                    output
+                    zip,
+                    depth + 1,
+                    child.attributes.type == FileMode.Type.DIRECTORY,
+                    onEntry
                 )
             }
     }
@@ -317,7 +327,7 @@ class SftpManager {
     }
 
     companion object {
-        private const val MAX_DOWNLOAD_ENTRIES = 20_000
+        private const val MAX_DOWNLOAD_DEPTH = 256
 
         /**
          * Ubah 9 bit izin POSIX menjadi "rwxr-xr-x". Sebelumnya nama enum yang dipakai,

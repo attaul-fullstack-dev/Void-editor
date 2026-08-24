@@ -111,6 +111,8 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - `node --check app/src/main/assets/voidedit.js` lolos.
 - `git diff --check` lolos.
 - Build lokal tidak tersedia karena repo tidak membawa wrapper; kompilasi Android diverifikasi oleh GitHub Actions setelah perubahan masuk ke branch yang memicu workflow.
+- Commit implementasi: `e2f4b21 Add SFTP download selection`.
+- PR: `#8 Add SFTP file and folder downloads`.
 
 ## Build dan GitHub Actions
 

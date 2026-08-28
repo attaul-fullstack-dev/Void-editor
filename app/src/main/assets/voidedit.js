@@ -683,7 +683,7 @@ function exitApp() {
       window.history.back();
     } else {
       // Tampilkan pesan "sudah ditutup"
-      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;background:#0d0d0d;color:#71717a;font-family:Inter,sans-serif;font-size:15px;text-align:center;padding:24px;">Aplikasi ditutup.<br>Anda bisa menutup tab ini.</div>';
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;background:#0d0d0d;color:#71717a;font-family:Roboto,system-ui,sans-serif;font-size:15px;text-align:center;padding:24px;">Aplikasi ditutup.<br>Anda bisa menutup tab ini.</div>';
     }
   }, 300);
 }
@@ -1734,7 +1734,7 @@ function renderLocalEntries(entries) {
       title: entry.name,
       meta: entry.directory
         ? "Folder"
-        : formatBytes(entry.size) + " · " + (entry.modified ? new Date(entry.modified).toLocaleDateString("id-ID") : "—"),
+        : formatBytes(entry.size) + " · " + (entry.modified ? formatFileDateTime(entry.modified) : "—"),
       onTap: () => {
         if (selectedLocalEntries.size) { toggleLocalSelection(entry); return; }
         if (entry.directory) {
@@ -1977,6 +1977,19 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + units[i];
 }
 
+function formatFileDateTime(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "\u2014";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(timestamp);
+}
+
 function updateSftpSelectionUi() {
   const count = selectedSftpEntries.size;
   sftpSelectionBar.hidden = count === 0;
@@ -2066,7 +2079,7 @@ function renderEntries(entries) {
     const meta = document.createElement('span'); meta.className = 'file-meta';
     meta.textContent = entry.directory
       ? 'Folder'
-      : `${formatBytes(entry.size)} · ${new Date(entry.modified).toLocaleDateString('id-ID')}${isImg ? ' · gambar' : ''}`;
+      : `${formatBytes(entry.size)} · ${formatFileDateTime(entry.modified)}${isImg ? ' · gambar' : ''}`;
     info.append(name, meta);
     row.append(icon, info);
     attachRowGestures(row, entry);

@@ -5,15 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#8b5cf6">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
 <title>VoidEdit</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<!-- Aset PWA (manifest.json, icon.svg) TIDAK ada di folder assets: link-nya dihapus
+     supaya WebView tidak menembak 404 tiap start. Google Fonts juga dihapus — aplikasi
+     ini offline-first (lihat aturan "JANGAN pakai CDN"), font remote hanya menambah
+     delay start + kebocoran request ke jaringan, dan CSS sudah punya fallback
+     monospace/sans-serif bawaan sistem. -->
 <link rel="stylesheet" href="voidedit.css">
 </head>
 <body>
@@ -186,7 +183,7 @@
   <form class="dialog-body" onsubmit="submitSftpInput(event)"><h3 id="sftp-input-title">Item baru</h3><div class="field"><label for="sftp-input-value">Nama</label><input id="sftp-input-value" required autocomplete="off"></div><div class="dialog-actions"><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Batal</button><button class="primary-action" style="padding:0 16px" type="submit">Simpan</button></div></form>
 </dialog>
 <dialog id="sftp-hostkey-dialog" class="sftp-dialog">
-  <div class="dialog-body"><h3>Verifikasi server</h3><p>Pastikan fingerprint SHA-256 ini sesuai dengan server Anda:</p><p id="sftp-fingerprint" style="font-family:'JetBrains Mono',monospace;color:var(--teal)"></p><div class="dialog-actions"><button class="secondary-action" type="button" onclick="rejectHostKey()">Batal</button><button class="primary-action" style="padding:0 16px" type="button" onclick="trustHostKey()">Percayai</button></div></div>
+  <div class="dialog-body"><h3>Verifikasi server</h3><p>Pastikan fingerprint SHA-256 ini sesuai dengan server Anda:</p><p id="sftp-fingerprint" style="font-family:var(--font-mono);color:var(--teal)"></p><div class="dialog-actions"><button class="secondary-action" type="button" onclick="rejectHostKey()">Batal</button><button class="primary-action" style="padding:0 16px" type="button" onclick="trustHostKey()">Percayai</button></div></div>
 </dialog>
 <dialog id="sftp-item-dialog" class="sftp-dialog">
   <div class="dialog-body"><h3 id="sftp-item-title">Aksi item</h3><p id="sftp-item-path"></p><button class="secondary-action" id="sftp-item-download" type="button" onclick="downloadSelectedItem()">Download</button><button class="secondary-action" id="sftp-item-select" type="button" onclick="selectCurrentItem()">Pilih untuk multi-select</button><button class="secondary-action" type="button" onclick="renameSelectedItem()">Ubah nama</button><button class="secondary-action" id="item-copy-uri" type="button" onclick="copySelectedUri()">Salin URI</button><button class="secondary-action" style="color:var(--err)" type="button" onclick="deleteSelectedItem()">Hapus</button><button class="secondary-action" type="button" onclick="this.closest('dialog').close()">Tutup</button></div>
@@ -217,9 +214,14 @@
     <button class="overlay-back" type="button" onclick="closePreview()">‹ Kembali</button>
     <span class="overlay-name" id="preview-name"></span>
   </div>
-  <!-- allow-scripts tanpa allow-same-origin: script halaman jalan, tapi origin opaque
-       sehingga preview tidak bisa menyentuh DOM/localStorage editor. -->
-  <iframe id="preview-frame" title="Preview" sandbox="allow-scripts allow-forms allow-modals allow-same-origin"></iframe>
+  <!-- allow-scripts TANPA allow-same-origin: script halaman jalan, tapi origin opaque
+       sehingga preview tidak bisa menyentuh DOM/localStorage editor.
+       CATATAN KEAMANAN: sebelumnya "allow-same-origin" ikut dipasang bersama
+       "allow-scripts" — kombinasi itu membatalkan seluruh isolasi sandbox. File HTML
+       yang dipreview (bisa berasal dari server SFTP mana pun) jadi bisa membaca
+       parent.document, mencuri kredensial SFTP di form, dan memanggil AndroidBridge.
+       Jangan pernah menambahkan allow-same-origin di sini lagi. -->
+  <iframe id="preview-frame" title="Preview" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-modals"></iframe>
 </section>
 
 <!-- AUTO-VIEWER GAMBAR (Fitur D.1) -->

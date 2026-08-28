@@ -28,6 +28,12 @@
     --syn-comment: #6b7280;
     --syn-number: #fb923c;
     --syn-builtin: #60a5fa;
+    /* Google Fonts dihapus (aplikasi offline-first), jadi stack font dipusatkan di sini.
+       PENTING: SEMUA layer editor (textarea, syntax-layer, highlight-layer, gutter)
+       WAJIB memakai --font-mono yang sama — kalau stack-nya beda sedikit saja,
+       "ghost textarea" jadi tidak sejajar dengan teks berwarna di belakangnya. */
+    --font-mono: ui-monospace, 'JetBrains Mono', 'Roboto Mono', 'Droid Sans Mono', 'Courier New', monospace;
+    --font-ui: 'Inter', 'Nunito', system-ui, -apple-system, 'Roboto', 'Segoe UI', sans-serif;
     --editor-font-size: 14px;
     --editor-line-height: 22px;
     --editor-padding-top: 16px;
@@ -47,7 +53,7 @@
     overflow: hidden;
     background: var(--bg-base);
     color: var(--text-primary);
-    font-family: 'Inter', 'Nunito', sans-serif;
+    font-family: var(--font-ui);
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -98,7 +104,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text-primary);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     padding: 8px 12px;
     outline: none;
@@ -116,7 +122,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text-secondary);
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 600;
     padding: 8px 12px;
@@ -158,7 +164,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text-secondary);
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     font-weight: 600;
     padding: 8px 10px;
@@ -189,7 +195,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text-secondary);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 600;
     padding: 7px 8px;
@@ -243,7 +249,7 @@
     left: 0;
     right: 0;
     padding-top: var(--editor-padding-top);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: var(--editor-font-size);
     line-height: var(--editor-line-height);
     color: var(--text-line-num);
@@ -283,7 +289,7 @@
     padding-left: var(--editor-padding-left);
     padding-right: 16px;
     padding-bottom: 80px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: var(--editor-font-size);
     line-height: var(--editor-line-height);
     white-space: pre;
@@ -324,7 +330,7 @@
     padding-left: var(--editor-padding-left);
     padding-right: 16px;
     padding-bottom: 80px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: var(--editor-font-size);
     line-height: var(--editor-line-height);
     white-space: pre;
@@ -366,7 +372,7 @@
     padding-left: var(--editor-padding-left);
     padding-right: 16px;
     padding-bottom: 80px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: var(--editor-font-size);
     line-height: var(--editor-line-height);
     white-space: pre;
@@ -393,7 +399,7 @@
     gap: 12px;
     flex-shrink: 0;
     font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     color: var(--text-secondary);
     overflow: hidden;
     position: relative;
@@ -572,7 +578,7 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     color: var(--text-primary);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     line-height: 20px;
     padding: 14px 16px;
@@ -590,7 +596,7 @@
     color: var(--text-secondary);
     min-height: 20px;
     margin-bottom: 16px;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -612,7 +618,7 @@
     border: 1px solid var(--border);
     border-radius: 12px;
     color: var(--text-primary);
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
     font-size: 14px;
     font-weight: 600;
     padding: 14px 10px;
@@ -638,7 +644,7 @@
   #nav-counter { 
     font-size: 13px; 
     color: var(--text-primary); 
-    font-family: 'JetBrains Mono', monospace; 
+    font-family: var(--font-mono); 
     margin-left: auto;
     background: var(--bg-elevated);
     padding: 6px 12px;
@@ -769,7 +775,7 @@
     color: var(--text-primary);
     text-align: center;
     line-height: 1.6;
-    font-family: 'Inter', 'Nunito', sans-serif;
+    font-family: var(--font-ui);
     max-width: 280px;
   }
 
@@ -784,7 +790,7 @@
     flex: 1;
     padding: 14px 16px;
     border-radius: 14px;
-    font-family: 'Inter', 'Nunito', sans-serif;
+    font-family: var(--font-ui);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
@@ -892,15 +898,15 @@
   #sftp-selection-count, #local-selection-count { flex: 1; color: var(--teal); font-size: 12px; font-weight: 700; }
   .selection-action { min-height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; cursor: pointer; }
   .selection-action.primary { border-color: transparent; background: var(--teal); color: var(--bg-base); }
-  #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #sftp-list { flex: 1; overflow-y: auto; padding: 6px; }
   .file-row { width: 100%; display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; touch-action: pan-y; }
   .file-row:active { background: var(--bg-elevated); }
   .file-row.selected { background: var(--teal-dim); box-shadow: inset 3px 0 0 var(--teal); }
   .file-row.selected .file-icon { background: var(--teal); color: var(--bg-base); }
-  .file-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); color: var(--teal); font: 700 12px 'JetBrains Mono', monospace; }
+  .file-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); color: var(--teal); font: 700 12px var(--font-mono); }
   .file-info { flex: 1; min-width: 0; }
-  .file-name { display: block; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-name { display: block; font: 13px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-meta { display: block; color: var(--text-muted); font-size: 11px; margin-top: 5px; }
   .state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); text-align: center; padding: 24px; line-height: 1.5; }
   #sftp-fab, #local-fab { position: absolute; right: 18px; bottom: 20px; width: 52px; height: 52px; border: 0; border-radius: 16px; background: var(--teal); color: var(--bg-base); font-size: 28px; box-shadow: 0 8px 24px rgba(0,0,0,.35); cursor: pointer; }
@@ -926,13 +932,13 @@
   #explorer-home.visible { display: flex; }
   .hub-title { padding: 12px 12px 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
   .hub-empty { padding: 6px 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
-  .badge { flex: 0 0 auto; align-self: center; margin-left: 8px; padding: 3px 7px; border-radius: 6px; background: var(--teal-dim); color: var(--teal); font: 700 10px 'JetBrains Mono', monospace; letter-spacing: .04em; }
+  .badge { flex: 0 0 auto; align-self: center; margin-left: 8px; padding: 3px 7px; border-radius: 6px; background: var(--teal-dim); color: var(--teal); font: 700 10px var(--font-mono); letter-spacing: .04em; }
   .badge.local { background: var(--accent-dim); color: var(--accent-hover); }
   .file-icon.action { background: var(--accent-dim); color: var(--accent-hover); }
   #local-browser { flex: 1; min-height: 0; display: none; flex-direction: column; }
   #local-browser.visible { display: flex; }
   #local-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
-  #local-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #local-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #local-list { flex: 1; overflow-y: auto; padding: 6px; }
 
   /* ── PREVIEW HTML/MARKDOWN (Fitur D.2 / D.3) ── */
@@ -942,7 +948,7 @@
   }
   #preview-overlay.open, #image-overlay.open { display: flex; }
   .overlay-head { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
-  .overlay-head .overlay-name { flex: 1; min-width: 0; font: 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overlay-head .overlay-name { flex: 1; min-width: 0; font: 13px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .overlay-back { min-height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 600; font-size: 13px; cursor: pointer; }
   #preview-frame { flex: 1; width: 100%; border: 0; background: #ffffff; }
   #image-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 16px; background: var(--bg-editor); }

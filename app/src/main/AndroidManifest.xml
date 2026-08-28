@@ -4,7 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -15,7 +17,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|locale|layoutDirection"
             android:windowSoftInputMode="adjustResize">
 
             <!-- Launcher -->
@@ -73,11 +75,40 @@
                 <data android:scheme="content" android:mimeType="image/*" />
             </intent-filter>
 
+            <!--
+                Buka dengan: semua tipe teks lain (text/x-java, text/x-python, text/xml, dll).
+                Tanpa filter wildcard ini, banyak file kode yang dijanjikan README (.js, .kt,
+                .py, .java, .xml) tidak muncul di daftar "Buka dengan" karena file manager
+                melaporkan MIME di luar daftar spesifik di atas.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="text/*" />
+            </intent-filter>
+
+            <!-- Buka dengan: MIME application/* untuk file kode & config -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/javascript" />
+                <data android:scheme="content" android:mimeType="application/x-javascript" />
+                <data android:scheme="content" android:mimeType="application/xml" />
+                <data android:scheme="content" android:mimeType="application/xhtml+xml" />
+                <data android:scheme="content" android:mimeType="application/x-sh" />
+                <data android:scheme="content" android:mimeType="application/x-yaml" />
+                <data android:scheme="content" android:mimeType="application/octet-stream" />
+            </intent-filter>
+
             <!-- Buka dengan: file:// scheme (file manager lama) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="file" android:mimeType="text/*" />
+                <data android:scheme="file" android:mimeType="application/json" />
+                <data android:scheme="file" android:mimeType="application/javascript" />
+                <data android:scheme="file" android:mimeType="application/xml" />
+                <data android:scheme="file" android:mimeType="image/*" />
             </intent-filter>
 
         </activity>

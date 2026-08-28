@@ -22,7 +22,6 @@ const btnUndo     = document.getElementById('btn-undo');
 const btnRedo     = document.getElementById('btn-redo');
 const btnWordWrap = document.getElementById('btn-wordwrap');
 const fontSizeSelect = document.getElementById('font-size-select');
-const wrapLabel   = document.getElementById('wrap-label');
 
 // ── STATE ──
 let matches = [];
@@ -38,7 +37,26 @@ let lastSavedContent = '';
 let remoteFileHint = null;
 
 // ── SYNTAX HIGHLIGHTING ──
+// Batas aman tokenisasi. Regex tokenizer berjalan atas SELURUH dokumen pada setiap
+// ketikan; pada file ratusan KB ke atas ini memblokir thread UI sehingga editor
+// terasa membeku beberapa detik per karakter. Di atas batas ini teks tetap tampil
+// (di-escape apa adanya), hanya pewarnaan yang dilewati.
+const MAX_HIGHLIGHT_CHARS = 120000;
+let syntaxSkipNotified = false;
+
 function renderSyntaxHighlight(code) {
+  if (code.length > MAX_HIGHLIGHT_CHARS) {
+    syntaxLayer.innerHTML = escHtml(code);
+    if (!syntaxSkipNotified) {
+      syntaxSkipNotified = true;
+      if (typeof sftpToast === 'function') {
+        sftpToast('File besar: pewarnaan sintaks dimatikan agar tetap responsif.');
+      }
+    }
+    return;
+  }
+  syntaxSkipNotified = false;
+
   // Tokenize with regex-based approach for JS syntax
   const tokens = [];
   const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\b(?:function|const|let|var|return|if|else|for|while|class|import|export|default|new|this|typeof|instanceof|switch|case|break|continue|throw|try|catch|finally|async|await|yield|do|in|of|void|delete|debugger|extends|super|static|get|set|from|as|with|enum|implements|interface|package|private|protected|public)\b)|(\b(?:console|Math|JSON|Object|Array|String|Number|Boolean|Date|RegExp|Map|Set|WeakMap|WeakSet|Promise|Symbol|Error|TypeError|RangeError|SyntaxError|parseInt|parseFloat|isNaN|isFinite|undefined|null|true|false|NaN|Infinity|globalThis|window|document|navigator|fetch|setTimeout|setInterval|clearTimeout|clearInterval|requestAnimationFrame|cancelAnimationFrame|alert|confirm|prompt)\b)|(\b(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)\b)/g;
@@ -85,7 +103,6 @@ function toggleWordWrap() {
   hlLayer.classList.toggle('word-wrap', wordWrapOn);
   btnWordWrap.classList.toggle('active', wordWrapOn);
   btnWordWrap.setAttribute('aria-pressed', String(wordWrapOn));
-  wrapLabel.textContent = 'Wrap';
   localStorage.setItem('voidedit-wordwrap', wordWrapOn ? '1' : '0');
   
   // Sembunyikan gutter (nomor baris) saat word wrap aktif
@@ -303,19 +320,37 @@ function renderHighlight(query = '', curIdx = -1) {
   hlLayer.innerHTML = result;
 }
 
-// ── FIND MATCHES ──
-function findMatches(query) {
-  matches = [];
-  if (!query) return;
-  const lq = query.toLowerCase();
-  const lc = textarea.value.toLowerCase();
+// ── NORMALISASI QUERY ──
+// Satu-satunya tempat normalisasi kata cari. Sebelumnya doSearch/replaceCurrent
+// menormalkan CRLF secara inline sedangkan replaceAll hanya .trim(), sehingga
+// query multi-baris ber-CRLF ditemukan oleh "Cari" tapi tidak pernah cocok di
+// "Ganti Semua". Semua pemanggil sekarang wajib lewat fungsi ini.
+function normalizeQuery(raw) {
+  return (raw || '').trim().split('\r\n').join('\n').split('\r').join('\n');
+}
+
+// ── SCAN POSISI (case-insensitive, tanpa regex) ──
+// Versi murni yang mengembalikan array; menghindari seluruh kelas bug escaping
+// regex pada input user.
+function findAllPositions(haystack, needle) {
+  const out = [];
+  if (!needle) return out;
+  const lh = (haystack || '').toLowerCase();
+  const ln = needle.toLowerCase();
   let i = 0;
   while (true) {
-    const pos = lc.indexOf(lq, i);
+    const pos = lh.indexOf(ln, i);
     if (pos === -1) break;
-    matches.push(pos);
-    i = pos + lq.length;
+    out.push(pos);
+    i = pos + ln.length;
   }
+  return out;
+}
+
+// ── FIND MATCHES ──
+// Wrapper yang menulis ke state global `matches`.
+function findMatches(query) {
+  matches = findAllPositions(textarea.value, query);
 }
 
 
@@ -477,7 +512,7 @@ searchInput.addEventListener('keydown', (e) => {
 });
 
 function doSearch() {
-  const q = searchInput.value.trim().split('\r\n').join('\n').split('\r').join('\n');
+  const q = normalizeQuery(searchInput.value);
   if (!q) {
     searchHint.textContent = 'Masukkan kata yang ingin dicari.';
     searchHint.className = 'warn';
@@ -514,7 +549,7 @@ function navMatch(dir) {
 }
 
 function replaceCurrent() {
-  const q = searchInput.value.trim().split('\r\n').join('\n').split('\r').join('\n');
+  const q = normalizeQuery(searchInput.value);
   if (!q) return;
 
   // Re-scan dulu dari teks terkini — hindari posisi stale
@@ -583,30 +618,42 @@ function replaceCurrent() {
 }
 
 function replaceAll() {
-  const q = searchInput.value.trim();
+  // Normalisasi CRLF sama seperti doSearch/replaceCurrent. Tanpa ini, mencari teks
+  // multi-baris yang diketik/di-paste dengan CRLF tidak akan pernah cocok di sini
+  // walaupun tombol "Cari" menemukannya (dua fungsi memakai query berbeda).
+  const q = normalizeQuery(searchInput.value);
   if (!q) return;
   const r = replaceInp.value;
-  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(escaped, 'gi');
-  const count = (textarea.value.match(regex) || []).length;
+
+  // Pencarian case-insensitive tanpa regex: hindari seluruh kelas bug escaping.
+  const positions = findAllPositions(textarea.value, q);
+  const count = positions.length;
   if (!count) return;
 
   // Hitung posisi hasil replace di string baru (akumulasi shift per match)
   const newRanges = [];
   if (r.length > 0) {
-    let src = textarea.value;
     let offset = 0;
-    const re2 = new RegExp(escaped, 'gi');
-    let m;
-    while ((m = re2.exec(src)) !== null) {
-      const newPos = m.index + offset;
-      newRanges.push({ pos: newPos, len: r.length });
+    positions.forEach((pos) => {
+      newRanges.push({ pos: pos + offset, len: r.length });
       offset += (r.length - q.length); // akumulasi shift setelah setiap replace
-    }
+    });
   }
 
+  // Rakit manual dari potongan: `String.replace` memperlakukan "$&", "$1", "$$"
+  // di string pengganti sebagai pola substitusi, sehingga mengganti dengan teks
+  // yang mengandung "$" menghasilkan output SALAH (mis. "$&" menyisipkan kembali
+  // teks yang dicari, bukan karakter "$&" itu sendiri).
+  let out = '';
+  let cursor = 0;
+  positions.forEach((pos) => {
+    out += textarea.value.slice(cursor, pos) + r;
+    cursor = pos + q.length;
+  });
+  out += textarea.value.slice(cursor);
+
   isProgrammaticChange = true;
-  textarea.value = textarea.value.replace(regex, r);
+  textarea.value = out;
   isProgrammaticChange = false;
   pushHistory(textarea.value);
   // clearSearch dulu, lalu set replacedRanges (urutan penting!)

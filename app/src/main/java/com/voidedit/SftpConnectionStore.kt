@@ -66,7 +66,7 @@ class SftpConnectionStore(context: Context) {
             key,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        ) as SharedPreferences
+        )
     }.getOrNull()
 
     /** false = enkripsi tidak tersedia; UI harus meminta user connect manual. */

@@ -197,3 +197,97 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 - PR #5 memperbaiki seluruh aksi tulis SAF di root bookmark dan sudah di-merge.
 - PR #6 memperbaiki recursive folder deletion dan sudah di-merge.
 - PR #7 menambahkan fitur hapus koneksi serta fingerprint dari commit `c557c7a` dan sudah di-merge.
+
+## Audit bug menyeluruh (11 perbaikan)
+
+### 1. Sandbox escape pada iframe Preview (KRITIS)
+
+**Gejala.** Tidak terlihat saat pemakaian normal. Halaman HTML yang dibuka dari server SFTP mana pun dapat mengakses `parent.document`, membaca kredensial di form koneksi SFTP, dan memanggil `AndroidBridge`.
+
+**Penyebab.** `sandbox="allow-scripts allow-forms allow-modals allow-same-origin"`. Kombinasi `allow-scripts` + `allow-same-origin` membatalkan isolasi sandbox karena iframe berbagi origin dengan halaman induk. Atribut ini bahkan bertentangan dengan komentar di baris sebelahnya sendiri.
+
+**Perbaikan.** Hapus `allow-same-origin` di `voidedit.html`, tambahkan `referrerpolicy="no-referrer"`.
+
+**Verifikasi.** Preview Markdown/HTML tetap berjalan; skrip di dalamnya tidak lagi bisa menyentuh `parent`.
+
+### 2. Promise menggantung saat pemilihan file dibatalkan
+
+**Gejala.** Tekan Upload / Import ZIP / Pilih private key lalu tekan Back di file picker. Overlay loading tidak pernah hilang dan tombol tidak bisa dipakai lagi sampai app di-restart.
+
+**Penyebab.** `pickFileLauncher` membuang `pickCallback` tanpa memanggil `emitResult`, sehingga entri di `pendingRequests` sisi JS tidak pernah di-resolve/reject. Mengenai 5 alur: `sftpUpload`, `sftpImportZip`, `sftpPickPrivateKey`, `localUpload`, `localImportZip`.
+
+**Perbaikan.** Tambah state `pickRequest: Pair<String, String>` plus helper `launchPicker(requestId, action, mimeType, onPicked)`. Pembatalan, hasil kosong, dan ketiadaan aplikasi picker semuanya membalas `emitResult(..., success = false, ...)`. Kelima call site dialihkan ke helper.
+
+**Verifikasi.** `gradle :app:assembleDebug` sukses; grep memastikan tidak ada lagi `pickCallback = {` mentah.
+
+### 3. U+2028 / U+2029 merusak seluruh payload bridge
+
+**Gejala.** File yang memuat karakter LINE/PARAGRAPH SEPARATOR gagal dibuka tanpa pesan error; hasil operasi SFTP tidak pernah sampai ke UI.
+
+**Penyebab.** `JSONObject.toString()` meloloskan U+2028/U+2029 mentah. Keduanya JSON yang sah tetapi di dalam skrip `evaluateJavascript` dihitung sebagai pemutus baris, sehingga literal string terpotong dan pemanggilan gagal senyap.
+
+**Perbaikan.** Helper `jsPayload()` yang meng-escape kedua karakter, dipakai di keempat titik: `emitResult`, `emitProgress`, `dispatchLoad`, `dispatchImage`.
+
+### 4. "Ganti Semua" merusak teks yang memuat `$`
+
+**Gejala.** Mengganti `foo` dengan `$& BAD` pada teks `foo bar` menghasilkan `foo BAD bar`, bukan `$& BAD bar`.
+
+**Penyebab.** `String.replace` memperlakukan `$&`, `$1`, `$$` pada string pengganti sebagai pola substitusi.
+
+**Perbaikan.** `replaceAll()` ditulis ulang tanpa regex: hitung posisi match lalu rakit output dengan `slice`.
+
+### 5. Query CRLF ditemukan "Cari" tetapi tidak oleh "Ganti Semua"
+
+**Penyebab.** `doSearch`/`replaceCurrent` menormalkan CRLF secara inline, sedangkan `replaceAll` hanya `.trim()` — tiga jalur memakai query berbeda.
+
+**Perbaikan.** Helper tunggal `normalizeQuery()` + `findAllPositions()`; ketiga jalur dan `findMatches()` kini memakai implementasi yang sama.
+
+### 6. Aset 404 dan Google Fonts di app offline-first
+
+**Penyebab.** `voidedit.html` merujuk `manifest.json`, `icon.svg`, `apple-touch-icon`, dan stylesheet Google Fonts. Ketiga file lokal tidak ada di `assets/`, dan font eksternal melanggar syarat offline.
+
+**Perbaikan.** Seluruh tautan tersebut dihapus. Font stack dikonsolidasikan ke variabel `--font-mono` / `--font-ui` di CSS.
+
+> Catatan penting: semua layer editor (`textarea`, `#syntax-layer`, `#highlight-layer`) WAJIB memakai `--font-mono` yang sama. Font berbeda antar layer membuat teks berwarna bergeser dari teks yang diketik.
+
+### 7. `getFileName()` bisa NPE dan selalu "untitled.txt" untuk `file://`
+
+**Penyebab.** `cursor.getString(col)` dapat mengembalikan `null` meski kolom ada, sementara variabel bertipe `String` non-null. Tidak ada fallback untuk skema `file://`.
+
+**Perbaikan.** Query hanya untuk skema `content`, hasil kosong/null diabaikan, fallback ke `uri.lastPathSegment`.
+
+### 8. WebView tidak pernah di-destroy (memory leak)
+
+**Perbaikan.** `onDestroy` kini memanggil `stopLoading()`, melepas view dari parent, lalu `webView.destroy()`.
+
+### 9. Editor membeku pada file besar
+
+**Gejala.** Pada file ratusan KB, setiap ketikan menahan UI beberapa detik.
+
+**Penyebab.** `renderSyntaxHighlight` menokenisasi ulang SELURUH dokumen pada setiap event input.
+
+**Perbaikan.** Batas `MAX_HIGHLIGHT_CHARS = 120000`. Di atas batas, teks tetap tampil (di-escape) dan hanya pewarnaan dilewati, dengan notifikasi sekali via `sftpToast`.
+
+### 10. Backup membocorkan kredensial SFTP
+
+**Penyebab.** `allowBackup="true"` memungkinkan `adb backup` menarik keluar `EncryptedSharedPreferences` berisi password dan private key.
+
+**Perbaikan.** `allowBackup="false"`, `fullBackupContent="false"`, dan `res/xml/data_extraction_rules.xml` yang menolak semua domain.
+
+### 11. Build release unsigned yang gagal senyap
+
+**Penyebab.** `signingConfig` selalu dibuat dengan `System.getenv(...) ?: ""`, menghasilkan APK release yang tidak bisa dipasang tanpa pesan jelas.
+
+**Perbaikan.** Config hanya didaftarkan bila keempat variabel env terisi DAN file keystore ada; jika tidak, Gradle mencetak peringatan eksplisit dan `signingConfig = null`.
+
+### Perbaikan minor
+
+- Manifest: intent filter `text/*` dan `application/*` untuk file kode (`.js/.kt/.py/.java/.xml`) yang dijanjikan README; `configChanges` diperluas dengan `uiMode|density|smallestScreenSize|fontScale|locale|layoutDirection`.
+- `SftpConnectionStore.kt:69` — cast `as SharedPreferences` yang redundan (warning `No cast needed`) dihapus.
+- Dead code: `wrapLabel.textContent = 'Wrap'` beserta referensi elemennya yang tidak terpakai.
+
+### Verifikasi akhir
+
+1. `node --check app/src/main/assets/voidedit.js` — OK.
+2. Audit silang otomatis: 0 DOM id hilang, 0 handler HTML tanpa definisi, bridge JS↔Kotlin 40/40 cocok dua arah.
+3. `gradle :app:assembleDebug :app:assembleRelease` — BUILD SUCCESSFUL, tanpa warning maupun error.

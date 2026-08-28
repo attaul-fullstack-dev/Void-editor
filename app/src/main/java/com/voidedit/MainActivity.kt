@@ -1,11 +1,16 @@
 package com.voidedit
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
@@ -19,6 +24,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -96,6 +102,48 @@ class MainActivity : AppCompatActivity() {
     )
 
     private var pendingLocalDownload: PendingLocalDownload? = null
+    private var pendingDownloadStart: (() -> Unit)? = null
+    private var downloadReceiverRegistered = false
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        val start = pendingDownloadStart
+        pendingDownloadStart = null
+        start?.invoke()
+    }
+
+    private val downloadEvents = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != DownloadService.ACTION_EVENT) return
+            val requestId = intent.getStringExtra(DownloadService.EXTRA_TASK_ID) ?: return
+            val operation = intent.getStringExtra(DownloadService.EXTRA_OPERATION) ?: "download"
+            when (intent.getStringExtra(DownloadService.EXTRA_EVENT_TYPE)) {
+                DownloadService.EVENT_PROGRESS -> emitProgress(
+                    requestId = requestId,
+                    done = intent.getIntExtra(DownloadService.EXTRA_DONE, 0),
+                    total = intent.getIntExtra(DownloadService.EXTRA_TOTAL, 0),
+                    label = intent.getStringExtra(DownloadService.EXTRA_LABEL).orEmpty(),
+                    operation = operation
+                )
+                DownloadService.EVENT_FINISHED -> {
+                    val success = intent.getBooleanExtra(DownloadService.EXTRA_SUCCESS, false)
+                    val fileName = intent.getStringExtra(DownloadService.EXTRA_FILE_NAME).orEmpty()
+                    val archive = intent.getBooleanExtra(DownloadService.EXTRA_ARCHIVE, false)
+                    val error = intent.getStringExtra(DownloadService.EXTRA_ERROR)
+                    emitProgress(requestId, 0, 0, "", operation, finished = true)
+                    if (success) toast("Download tersimpan: $fileName")
+                    emitResult(
+                        requestId,
+                        operation,
+                        success,
+                        if (success) JSONObject().put("name", fileName).put("archive", archive) else null,
+                        error
+                    )
+                }
+            }
+        }
+    }
 
     private val openFileLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -206,7 +254,28 @@ class MainActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         } catch (_: Exception) {}
-        performSftpDownload(pending, uri)
+        runDownloadWithNotificationPermission start@{
+            val config = sftp.authenticatedConfig()
+            if (config == null) {
+                discardCreatedOutput(uri)
+                emitResult(pending.requestId, "download", false, null, "Koneksi SFTP sudah tidak aktif")
+                return@start
+            }
+            runCatching {
+                DownloadService.startSftp(
+                    this,
+                    pending.requestId,
+                    uri,
+                    pending.fileName,
+                    pending.archive,
+                    pending.items,
+                    config
+                )
+            }.onFailure {
+                discardCreatedOutput(uri)
+                emitResult(pending.requestId, "download", false, null, it.message ?: "Download gagal dimulai")
+            }
+        }
     }
 
     private val localDownloadFileLauncher = registerForActivityResult(
@@ -226,7 +295,37 @@ class MainActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         } catch (_: Exception) {}
-        performLocalDownload(pending, uri)
+        runDownloadWithNotificationPermission {
+            val itemsJson = JSONArray().apply {
+                pending.items.forEach { item ->
+                    put(
+                        JSONObject()
+                            .put("name", item.name)
+                            .put("uri", item.uri.toString())
+                            .put("directory", item.directory)
+                    )
+                }
+            }.toString()
+            runCatching {
+                DownloadService.startLocal(
+                    this,
+                    pending.requestId,
+                    uri,
+                    pending.fileName,
+                    pending.archive,
+                    itemsJson
+                )
+            }.onFailure {
+                discardCreatedOutput(uri)
+                emitResult(
+                    pending.requestId,
+                    "localDownload",
+                    false,
+                    null,
+                    it.message ?: "Download lokal gagal dimulai"
+                )
+            }
+        }
     }
 
     // Fitur E: pemilih FOLDER (bukan file). Izin dipertahankan agar tetap bisa dibaca
@@ -265,6 +364,14 @@ class MainActivity : AppCompatActivity() {
 
         webView = WebView(this)
         setContentView(webView)
+
+        ContextCompat.registerReceiver(
+            this,
+            downloadEvents,
+            IntentFilter(DownloadService.ACTION_EVENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        downloadReceiverRegistered = true
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -314,9 +421,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // Sesi hanya diputus saat Activity benar-benar mati. Selama app masih berjalan
-        // (pindah layar Explorer, buka file, background singkat) koneksi dibiarkan hidup —
-        // SftpManager juga memulihkan sesi otomatis bila server memutus koneksi idle.
+        if (downloadReceiverRegistered) {
+            runCatching { unregisterReceiver(downloadEvents) }
+            downloadReceiverRegistered = false
+        }
+        // Download berjalan di DownloadService dan tidak dibatalkan bersama Activity.
         scope.cancel()
         runCatching { sftp.disconnect() }
         // WebView memegang referensi ke Activity; tanpa destroy() proses renderer dan
@@ -652,6 +761,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    private fun runDownloadWithNotificationPermission(start: () -> Unit) {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingDownloadStart = start
+            runCatching {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }.onFailure {
+                pendingDownloadStart = null
+                start()
+            }
+        } else {
+            start()
+        }
+    }
+
+    private fun discardCreatedOutput(uri: Uri) {
+        runCatching { DocumentsContract.deleteDocument(contentResolver, uri) }
+    }
 
     // Salin content:// ke cache lalu jalankan aksi; hapus temp di finally.
     private fun withCachedFile(uri: Uri, prefix: String, block: (File, String) -> Unit) {

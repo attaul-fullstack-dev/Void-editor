@@ -169,11 +169,36 @@ Koneksi ke host yang server key-nya berubah ditolak dengan pesan `Fingerprint ho
 
 ## Build dan GitHub Actions
 
-- Repo tidak memiliki `gradlew`/Gradle wrapper dan environment lokal tidak memiliki Gradle.
-- `.github/workflows/build.yaml` mengunduh Gradle 8.7, membuat wrapper, lalu menjalankan `assembleDebug`.
+- Repo sudah menyertakan Gradle wrapper 8.7 dengan checksum distribusi yang dipin.
+- `.github/workflows/build.yaml` memvalidasi wrapper, menyiapkan JDK 17, lalu menjalankan `assembleDebug`.
+- Environment Codex saat ini tidak memiliki Java/JAVA_HOME, sehingga build lokal tetap dialihkan ke GitHub Actions.
 - Build release hanya berjalan jika secret keystore tersedia.
 - Trigger push hanya untuk `main`, `master`, dan tag `v*`; feature branch tidak otomatis menjalankan build.
 - Push branch dan pembuatan Pull Request adalah dua aksi berbeda. Gunakan `gh pr list` untuk mengecek duplikat sebelum `gh pr create`.
+
+
+## 2026-08-28 - Font daftar file dan waktu modifikasi lebih terbaca
+
+### Kebutuhan
+
+- Font antarmuka dan nama file harus mudah dibaca di layar Android.
+- Metadata setiap file lokal dan SFTP harus menampilkan jam serta menit, bukan tanggal saja.
+
+### Implementasi
+
+- Prioritaskan Roboto dan font UI sistem Android melalui `--font-ui`; editor kode tetap memakai `--font-mono` agar alignment syntax layer tidak rusak.
+- Nama file lokal/SFTP memakai font UI 14 px dengan bobot 500; metadata dinaikkan menjadi 12 px.
+- Tambahkan satu formatter `formatFileDateTime()` untuk kedua explorer.
+- Waktu modifikasi mengikuti locale dan zona waktu perangkat dengan format seperti `28 Agu 2026, 14.35`.
+- Timestamp kosong atau tidak valid tetap ditampilkan sebagai `\u2014`.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- Contoh formatter menghasilkan `28 Agu 2026, 14.35`.
+- Build lokal tidak dapat dimulai karena Java/JAVA_HOME tidak tersedia; build Android diverifikasi melalui GitHub Actions.
+- Branch: `feat/readable-font-file-times`.
 
 ## Kendala tooling Codex di workspace
 

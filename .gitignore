@@ -8,3 +8,7 @@
 *.jks
 *.keystore
 *.b64
+local.properties
+/build
+/app/build
+.gradle/

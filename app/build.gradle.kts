@@ -15,13 +15,30 @@ android {
         versionName = "1.0.0"
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "keystore.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: ""
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+    // Signing hanya didaftarkan bila SEMUA variabel env tersedia dan keystore benar-benar
+    // ada. Versi lama selalu membuat config dengan password "" sehingga build release
+    // tanpa secret menghasilkan APK yang gagal dipasang, tanpa pesan error yang jelas.
+    val keystorePath = System.getenv("KEYSTORE_PATH")
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val keystoreAlias = System.getenv("KEY_ALIAS")
+    val keystoreKeyPassword = System.getenv("KEY_PASSWORD")
+    val releaseSigningReady = !keystorePath.isNullOrBlank() &&
+        !keystorePassword.isNullOrBlank() &&
+        !keystoreAlias.isNullOrBlank() &&
+        !keystoreKeyPassword.isNullOrBlank() &&
+        file(keystorePath).exists()
+
+    if (releaseSigningReady) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = keystoreAlias
+                keyPassword = keystoreKeyPassword
+            }
         }
+    } else {
+        logger.lifecycle("VoidEdit: keystore tidak lengkap — build release TIDAK ditandatangani.")
     }
 
     buildTypes {
@@ -32,7 +49,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else null
         }
         debug {
             applicationIdSuffix = ".debug"

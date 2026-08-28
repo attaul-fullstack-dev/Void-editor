@@ -22,13 +22,11 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Generate Gradle Wrapper
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
-          unzip -q gradle.zip -d /opt/gradle
-          export PATH="/opt/gradle/gradle-8.7/bin:$PATH"
-          gradle wrapper --gradle-version 8.7 --distribution-type bin
-          chmod +x gradlew
+      # Wrapper kini di-commit ke repo (gradlew + gradle/wrapper/), jadi tidak perlu
+      # lagi mengunduh Gradle dan men-generate ulang setiap build. Versi Gradle juga
+      # terkunci lewat gradle-wrapper.properties beserta distributionSha256Sum.
+      - name: Verify Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v3
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon

@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.BroadcastReceiver
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -14,6 +15,7 @@ import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -61,6 +63,11 @@ class MainActivity : AppCompatActivity() {
 
     // Launcher pemilihan file yang menyalurkan hasil ke handler dinamis.
     private var pickCallback: ((Uri) -> Unit)? = null
+
+    // (requestId, action) milik pemilihan file yang sedang berjalan. Wajib ada supaya
+    // pembatalan picker tetap membalas ke JS — tanpa ini Promise di sisi WebView
+    // menggantung selamanya dan overlay "loading" tidak pernah hilang.
+    private var pickRequest: Pair<String, String>? = null
 
     // requestId yang menunggu hasil ACTION_OPEN_DOCUMENT_TREE (Fitur E).
     private var pendingTreeRequestId: String? = null
@@ -179,9 +186,54 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val cb = pickCallback
+        val req = pickRequest
         pickCallback = null
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri -> cb?.invoke(uri) }
+        pickRequest = null
+        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        if (uri != null && cb != null) {
+            cb.invoke(uri)
+        } else if (req != null) {
+            // Dibatalkan (atau tidak ada data): balas gagal supaya Promise di JS selesai.
+            emitResult(
+                req.first,
+                req.second,
+                false,
+                null,
+                if (result.resultCode == Activity.RESULT_OK) "Tidak ada file yang dipilih" else "Dibatalkan"
+            )
+        }
+    }
+
+    /**
+     * JSON valid tapi belum tentu JavaScript valid: U+2028 (LINE SEPARATOR) dan
+     * U+2029 (PARAGRAPH SEPARATOR) dibiarkan mentah oleh JSONObject, sedangkan di
+     * dalam skrip yang dieksekusi evaluateJavascript keduanya dihitung sebagai
+     * pemutus baris sehingga literal string jadi rusak dan seluruh pemanggilan
+     * gagal senyap. File yang mengandung karakter itu wajib di-escape dulu.
+     */
+    private fun jsPayload(json: String): String =
+        json.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+    /**
+     * Membuka picker sambil mencatat (requestId, action) supaya pembatalan selalu
+     * dibalas ke JS. Semua alur pilih-file wajib lewat fungsi ini.
+     */
+    private fun launchPicker(
+        requestId: String,
+        action: String,
+        mimeType: String,
+        onPicked: (Uri) -> Unit
+    ) {
+        pickCallback = onPicked
+        pickRequest = requestId to action
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+        }
+        runCatching { pickFileLauncher.launch(intent) }.onFailure {
+            pickCallback = null
+            pickRequest = null
+            emitResult(requestId, action, false, null, "Tidak ada aplikasi pemilih file")
         }
     }
 
@@ -376,6 +428,13 @@ class MainActivity : AppCompatActivity() {
         // Download berjalan di DownloadService dan tidak dibatalkan bersama Activity.
         scope.cancel()
         runCatching { sftp.disconnect() }
+        // WebView memegang referensi ke Activity; tanpa destroy() proses renderer dan
+        // Activity ikut tertahan (memory leak) setiap kali Activity dibuat ulang.
+        runCatching {
+            webView.stopLoading()
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
         super.onDestroy()
     }
 
@@ -437,7 +496,7 @@ class MainActivity : AppCompatActivity() {
             .put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
             .toString()
         webView.post {
-            webView.evaluateJavascript("window.__voidLoadImage && window.__voidLoadImage($payload)", null)
+            webView.evaluateJavascript("window.__voidLoadImage && window.__voidLoadImage(${jsPayload(payload)})", null)
         }
     }
 
@@ -587,19 +646,29 @@ class MainActivity : AppCompatActivity() {
             .put("remotePath", remotePath ?: JSONObject.NULL)
             .toString()
         webView.post {
-            webView.evaluateJavascript("window.__voidLoadFile && window.__voidLoadFile($payload)", null)
+            webView.evaluateJavascript("window.__voidLoadFile && window.__voidLoadFile(${jsPayload(payload)})", null)
         }
     }
 
     private fun getFileName(uri: Uri): String {
-        var name = "untitled.txt"
-        try {
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val col = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst() && col >= 0) name = cursor.getString(col)
-            }
-        } catch (_: Exception) {}
-        return name
+        // getString() boleh mengembalikan null walau kolomnya ada (mis. provider yang
+        // tidak mengisi DISPLAY_NAME) — menugaskannya ke String non-null memicu NPE.
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            try {
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val col = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && col >= 0) {
+                        val value = cursor.getString(col)?.trim()
+                        if (!value.isNullOrEmpty()) return value
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        // Fallback untuk file:// dan content:// tanpa DISPLAY_NAME. Tanpa ini, membuka
+        // file lewat ACTION_VIEW dari file manager selalu bernama "untitled.txt".
+        val segment = uri.lastPathSegment?.substringAfterLast('/')?.trim()
+        if (!segment.isNullOrEmpty()) return segment
+        return "untitled.txt"
     }
 
     private fun safeSuggestedName(raw: String, fallback: String): String =
@@ -981,7 +1050,7 @@ class MainActivity : AppCompatActivity() {
             .put("error", error ?: JSONObject.NULL)
             .toString()
         webView.post {
-            webView.evaluateJavascript("window.onSftpResult && window.onSftpResult($payload)", null)
+            webView.evaluateJavascript("window.onSftpResult && window.onSftpResult(${jsPayload(payload)})", null)
         }
     }
 
@@ -1002,7 +1071,7 @@ class MainActivity : AppCompatActivity() {
             .put("finished", finished)
             .toString()
         webView.post {
-            webView.evaluateJavascript("window.onSftpProgress && window.onSftpProgress($payload)", null)
+            webView.evaluateJavascript("window.onSftpProgress && window.onSftpProgress(${jsPayload(payload)})", null)
         }
     }
 
@@ -1260,7 +1329,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sftpUpload(requestId: String, remoteDir: String) {
             runOnUiThread {
-                pickCallback = { uri ->
+                launchPicker(requestId, "upload", "*/*") { uri ->
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
@@ -1278,10 +1347,6 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                })
             }
         }
 
@@ -1289,7 +1354,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sftpImportZip(requestId: String, remoteDir: String) {
             runOnUiThread {
-                pickCallback = { uri ->
+                launchPicker(requestId, "importZip", "application/zip") { uri ->
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
@@ -1312,17 +1377,13 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "application/zip"
-                })
             }
         }
 
         @JavascriptInterface
         fun sftpPickPrivateKey(requestId: String) {
             runOnUiThread {
-                pickCallback = { uri ->
+                launchPicker(requestId, "pickKey", "*/*") { uri ->
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
@@ -1340,10 +1401,6 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                })
             }
         }
 
@@ -1576,7 +1633,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun localUpload(requestId: String, parentUri: String) {
             runOnUiThread {
-                pickCallback = { source ->
+                launchPicker(requestId, "localUpload", "*/*") { source ->
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching { copyUriToFolder(source, Uri.parse(parentUri)) }
@@ -1587,17 +1644,13 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                })
             }
         }
 
         @JavascriptInterface
         fun localImportZip(requestId: String, parentUri: String) {
             runOnUiThread {
-                pickCallback = { source ->
+                launchPicker(requestId, "localImportZip", "application/zip") { source ->
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
@@ -1618,10 +1671,6 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                pickFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "application/zip"
-                })
             }
         }
 

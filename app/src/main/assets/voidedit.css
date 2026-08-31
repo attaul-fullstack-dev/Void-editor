@@ -32,10 +32,12 @@
        PENTING: SEMUA layer editor (textarea, syntax-layer, highlight-layer, gutter)
        WAJIB memakai --font-mono yang sama — kalau stack-nya beda sedikit saja,
        "ghost textarea" jadi tidak sejajar dengan teks berwarna di belakangnya. */
-    --font-mono: ui-monospace, 'JetBrains Mono', 'Roboto Mono', 'Droid Sans Mono', 'Courier New', monospace;
+    /* Gunakan font monospace bawaan Android/WebView secara langsung. Stack nama font
+       desktop sering tidak terpasang di HP dan membuat fallback berbeda antar-device. */
+    --font-mono: monospace;
     --font-ui: "Roboto", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-    --editor-font-size: 14px;
-    --editor-line-height: 22px;
+    --editor-font-size: 15px;
+    --editor-line-height: 24px;
     --editor-padding-top: 16px;
     --editor-padding-left: 12px;
     --toolbar-h: 56px;
@@ -255,6 +257,12 @@
     color: var(--text-line-num);
     text-align: right;
     padding-right: 12px;
+  }
+
+  #line-numbers, #highlight-layer, #syntax-layer, #editor-textarea {
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+    letter-spacing: 0;
   }
 
   .line-num { display: block; height: var(--editor-line-height); transition: color 0.2s; }

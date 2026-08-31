@@ -237,14 +237,15 @@ class DownloadService : Service() {
             val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
             val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
             while (cursor.moveToNext()) {
+                val documentId = cursor.getString(idColumn) ?: continue
                 val mime = cursor.getString(mimeColumn)
                 children += LocalChild(
-                    cursor.getString(nameColumn),
-                    DocumentsContract.buildDocumentUriUsingTree(parent, cursor.getString(idColumn)),
+                    cursor.getString(nameColumn) ?: documentId.substringAfterLast('/'),
+                    DocumentsContract.buildDocumentUriUsingTree(parent, documentId),
                     mime == DocumentsContract.Document.MIME_TYPE_DIR
                 )
             }
-        }
+        } ?: error("Isi folder lokal tidak dapat dibaca")
         return children
     }
 

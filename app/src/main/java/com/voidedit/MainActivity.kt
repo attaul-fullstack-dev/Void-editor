@@ -458,9 +458,7 @@ class MainActivity : AppCompatActivity() {
         }
         // Download berjalan di DownloadService dan tidak dibatalkan bersama Activity.
         scope.cancel()
-        val activePrivateKey = sftp.authenticatedConfig()?.privateKeyPath
         runCatching { sftp.disconnect() }
-        deleteManagedPrivateKeyIfUnused(activePrivateKey)
         // WebView memegang referensi ke Activity; tanpa destroy() proses renderer dan
         // Activity ikut tertahan (memory leak) setiap kali Activity dibuat ulang.
         runCatching {

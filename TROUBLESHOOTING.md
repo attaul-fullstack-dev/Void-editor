@@ -518,12 +518,42 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 
 - Pindahkan read dokumen serta write Save As ke `Dispatchers.IO`; pertahankan pelaporan hasil dan guard Save selama write berlangsung.
 - Gunakan generation token bersama pada seluruh alur open agar hanya pilihan terbaru yang boleh mengubah editor/viewer.
-- Hapus hanya private key yang berada tepat di direktori key milik aplikasi dan tidak direferensikan koneksi aktif maupun tersimpan; lakukan cleanup saat replace, batal, update, delete, disconnect, Activity ditutup, dan copy gagal.
+- Hapus hanya private key yang berada tepat di direktori key milik aplikasi dan tidak direferensikan koneksi aktif maupun tersimpan; lakukan cleanup saat replace, batal, update, delete, disconnect eksplisit, dan copy gagal.
 - Tangani kegagalan document picker dengan pesan native.
 
 ### Verifikasi
 
 - `node --check app/src/main/assets/voidedit.js` lolos.
 - Audit handler HTML, DOM id, dan bridge JS–Kotlin lolos.
+- `git diff --check` lolos.
+- Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.
+
+## 2026-08-31 — Font editor terbaca dan audit integritas ZIP lokal
+
+### Gejala
+
+- Font editor bergantung pada daftar font desktop yang umumnya tidak terpasang di Android, sehingga fallback dan keterbacaan berbeda antarperangkat.
+- Download folder lokal dapat dilaporkan sukses sebagai ZIP kosong ketika DocumentsProvider gagal mengembalikan cursor daftar anak.
+- `DISPLAY_NAME` null dari provider dapat menggagalkan traversal download.
+- Cleanup key saat Activity ditutup dapat berlomba dengan foreground download yang baru mulai memakai key tersebut.
+
+### Penyebab
+
+- Stack editor mencoba beberapa family opsional sebelum generic monospace.
+- `DownloadService.listLocalChildren()` mengubah hasil query null menjadi list kosong dan menganggapnya folder kosong yang sah.
+- Nama child diasumsikan selalu non-null.
+- Activity menghapus key aktif tepat setelah memutus koneksi UI, sementara DownloadService berjalan independen.
+
+### Solusi
+
+- Gunakan monospace bawaan Android/WebView secara langsung, naikkan default menjadi 15 px dengan line-height 24 px, dan matikan ligature identik pada seluruh layer editor.
+- Bedakan folder kosong yang valid dari query provider yang gagal; query null sekarang menghentikan download agar ZIP tidak menyesatkan.
+- Gunakan document ID sebagai fallback nama child.
+- Jangan menghapus key saat Activity dihancurkan; lifecycle cleanup lain yang tidak mengganggu download tetap dipertahankan.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- Audit handler HTML, DOM id, bridge JS–Kotlin, dan kesamaan metrik empat layer editor lolos.
 - `git diff --check` lolos.
 - Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.

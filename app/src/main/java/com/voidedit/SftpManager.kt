@@ -219,6 +219,7 @@ class SftpManager {
     ) = withClient(retryOnDisconnect = false) { client ->
         require(items.isNotEmpty()) { "Tidak ada item yang dipilih" }
         var completed = 0
+        val usedPaths = mutableSetOf<String>()
         ZipOutputStream(output.buffered()).use { zip ->
             items.forEach { item ->
                 checkCancelled()
@@ -228,6 +229,7 @@ class SftpManager {
                     entryName = safeZipSegment(item.name),
                     zip = zip,
                     depth = 0,
+                    usedPaths = usedPaths,
                     checkCancelled = checkCancelled,
                     onEntry = { label, finished ->
                         if (finished) completed += 1
@@ -265,6 +267,7 @@ class SftpManager {
         entryName: String,
         zip: ZipOutputStream,
         depth: Int,
+        usedPaths: MutableSet<String>,
         directoryHint: Boolean? = null,
         checkCancelled: () -> Unit = {},
         onEntry: (String, Boolean) -> Unit
@@ -272,7 +275,8 @@ class SftpManager {
         checkCancelled()
         require(depth <= MAX_DOWNLOAD_DEPTH) { "Folder terlalu dalam untuk dijadikan ZIP" }
         val directory = directoryHint ?: (client.lstat(remotePath).type == FileMode.Type.DIRECTORY)
-        val zipName = if (directory) entryName.removeSuffix("/") + "/" else entryName
+        val uniqueEntryName = uniqueZipPath(entryName, usedPaths)
+        val zipName = if (directory) uniqueEntryName + "/" else uniqueEntryName
         onEntry(zipName, false)
         zip.putNextEntry(ZipEntry(zipName))
         if (!directory) copyRemoteFile(client, remotePath, zip, checkCancelled)
@@ -286,9 +290,10 @@ class SftpManager {
                 writeZipSource(
                     client,
                     join(remotePath, child.name),
-                    entryName + "/" + safeZipSegment(child.name),
+                    uniqueEntryName + "/" + safeZipSegment(child.name),
                     zip,
                     depth + 1,
+                    usedPaths,
                     child.attributes.type == FileMode.Type.DIRECTORY,
                     checkCancelled,
                     onEntry
@@ -401,6 +406,23 @@ class SftpManager {
             val normalizedParent = normalize(parent)
             val normalizedCandidate = normalize(candidate)
             return normalizedCandidate == normalizedParent || normalizedCandidate.startsWith("$normalizedParent/")
+        }
+
+        internal fun uniqueZipPath(proposed: String, usedPaths: MutableSet<String>): String {
+            val clean = proposed.trimEnd('/')
+            if (usedPaths.add(clean)) return clean
+            val parent = clean.substringBeforeLast('/', "")
+            val leaf = clean.substringAfterLast('/')
+            val dot = leaf.lastIndexOf('.').takeIf { it > 0 } ?: leaf.length
+            val stem = leaf.substring(0, dot)
+            val extension = leaf.substring(dot)
+            var index = 2
+            while (true) {
+                val renamedLeaf = "$stem ($index)$extension"
+                val candidate = if (parent.isEmpty()) renamedLeaf else "$parent/$renamedLeaf"
+                if (usedPaths.add(candidate)) return candidate
+                index += 1
+            }
         }
 
         private fun safeZipSegment(name: String): String {

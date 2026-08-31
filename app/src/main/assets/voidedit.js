@@ -31,6 +31,7 @@ let activeQuery = ''; // query aktif untuk highlight, terpisah dari popup state
 let wordWrapOn = false;
 let isDirty = false;
 let lastSavedContent = '';
+let previewResourcesAvailable = false;
 // Cermin read-only dari activeRemotePath milik native. HANYA untuk keperluan tampilan
 // (judul file + pesan toast setelah simpan). Routing Save tetap sepenuhnya diputuskan
 // oleh MainActivity, jadi nilai ini tidak boleh dijadikan sumber kebenaran.
@@ -697,9 +698,11 @@ function exitApp() {
 }
 
 // ── LOAD FILE CONTENT (dari intent/share/URL) ──
-function loadFileContent(content, name) {
+function loadFileContent(content, name, options = {}) {
   closeImageViewer();
   closePreview();
+  remoteFileHint = options.remotePath || null;
+  previewResourcesAvailable = !!options.previewResources;
   textarea.value = content;
   fileNameInp.value = name || 'untitled.txt';
   updatePreviewButton();
@@ -715,9 +718,12 @@ function loadFileContent(content, name) {
 
 // Kontrak JSON dari native (aman terhadap backtick/backslash/Unicode).
 window.__voidLoadFile = function (payload) {
-  remoteFileHint = payload.remotePath || null;
-  const displayName = remoteFileHint ? (payload.name || remoteFileHint.split('/').pop()) : payload.name;
-  loadFileContent(payload.content || '', displayName);
+  const remotePath = payload.remotePath || null;
+  const displayName = remotePath ? (payload.name || remotePath.split('/').pop()) : payload.name;
+  loadFileContent(payload.content || '', displayName, {
+    remotePath,
+    previewResources: payload.previewResources
+  });
 };
 
 /* ══════════ PREVIEW HTML / MARKDOWN (Fitur D.2 & D.3) ══════════ */
@@ -751,6 +757,9 @@ const MARKDOWN_CSS = `
 `;
 
 function buildPreviewDocument(name, source) {
+  const base = previewResourcesAvailable
+    ? '<base href="https://preview.voidedit.local/">'
+    : '';
   if (['md', 'markdown'].includes(fileExt(name))) {
     let body;
     if (window.marked && typeof window.marked.parse === 'function') {
@@ -761,9 +770,15 @@ function buildPreviewDocument(name, source) {
     }
     return `<!doctype html><html lang="id"><head><meta charset="utf-8">` +
       `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-      `<style>${MARKDOWN_CSS}</style></head><body>${body}</body></html>`;
+      base + `<style>${MARKDOWN_CSS}</style></head><body>${body}</body></html>`;
   }
-  return source;
+  if (!previewResourcesAvailable) return source;
+  // Origin virtual ini dipetakan native ke folder file HTML aktif. Path absolut maupun
+  // relatif tetap berada di project tersebut dan tidak dapat membaca path server lain.
+  if (/<head(?:\s[^>]*)?>/i.test(source)) {
+    return source.replace(/<head(\s[^>]*)?>/i, (head) => head + base);
+  }
+  return base + source;
 }
 
 function openPreview() {
@@ -1135,10 +1150,12 @@ const localActionMenu = document.getElementById("local-action-menu");
 const localProgressEl = document.getElementById("local-progress");
 const localSelectionBar = document.getElementById("local-selection-bar");
 const localSelectionCount = document.getElementById("local-selection-count");
+const localSelectionRename = document.getElementById("local-selection-rename");
 const localFab = document.getElementById("local-fab");
 const sftpProgressEl = document.getElementById('sftp-progress');
 const sftpSelectionBar = document.getElementById('sftp-selection-bar');
 const sftpSelectionCount = document.getElementById('sftp-selection-count');
+const sftpSelectionRename = document.getElementById('sftp-selection-rename');
 const sftpFab = document.getElementById('sftp-fab');
 const sftpToastEl = document.getElementById('sftp-toast');
 
@@ -1705,6 +1722,7 @@ function updateLocalSelectionUi() {
   const count = selectedLocalEntries.size;
   localSelectionBar.hidden = count === 0;
   localSelectionCount.textContent = count + " dipilih";
+  localSelectionRename.hidden = count !== 1;
   localFab.style.display = count ? "none" : "";
 }
 
@@ -1753,6 +1771,38 @@ function downloadLocalSelection() {
   startLocalDownload(Array.from(selectedLocalEntries.values()));
 }
 
+function renameLocalSelection() {
+  const entry = selectedLocalEntries.values().next().value;
+  if (!entry || selectedLocalEntries.size !== 1) return;
+  selectedEntry = entry;
+  selectedEntrySource = 'local';
+  renameSelectedItem();
+}
+
+async function deleteLocalSelection() {
+  const items = Array.from(selectedLocalEntries.values());
+  if (!items.length) return;
+  const ok = await showConfirm(
+    `Hapus permanen ${items.length} item terpilih beserta seluruh isi foldernya?`,
+    'Hapus',
+    'Batal'
+  );
+  if (ok !== 'ok') return;
+  let deleted = 0;
+  let failure = null;
+  for (const item of items) {
+    try {
+      await callBridge(null, (id) => bridge.localDelete(id, item.uri));
+      deleted += 1;
+    } catch (err) { failure = err; break; }
+  }
+  clearLocalSelection(false);
+  if (failure) items.slice(deleted).forEach((item) => selectedLocalEntries.set(item.uri, item));
+  updateLocalSelectionUi();
+  loadLocalList();
+  sftpToast(failure ? `${deleted} terhapus, gagal melanjutkan: ${failure.message}` : `${deleted} item terhapus`);
+}
+
 function renderLocalEntries(entries) {
   currentLocalEntries = Array.isArray(entries) ? entries : [];
   const visibleUris = new Set(currentLocalEntries.map((entry) => entry.uri));
@@ -1799,7 +1849,8 @@ async function openLocalFile(entry) {
   if (!isImageName(entry.name) && !await confirmReplaceEditor()) return;
   sftpToast('Membuka ' + entry.name + '…');
   try {
-    await callBridge(null, (id) => bridge.localOpen(id, entry.uri));
+    const current = localStack[localStack.length - 1];
+    await callBridge(null, (id) => bridge.localOpen(id, entry.uri, current ? current.uri : ''));
     closeSftpPanel();
   } catch (err) { sftpToast(err.message); }
 }
@@ -2044,6 +2095,7 @@ function updateSftpSelectionUi() {
   const count = selectedSftpEntries.size;
   sftpSelectionBar.hidden = count === 0;
   sftpSelectionCount.textContent = count + " dipilih";
+  sftpSelectionRename.hidden = count !== 1;
   sftpFab.style.display = count ? "none" : "";
 }
 
@@ -2101,6 +2153,41 @@ function downloadSftpSelection() {
   startSftpDownload(Array.from(selectedSftpEntries.values()));
 }
 
+function renameSftpSelection() {
+  const entry = selectedSftpEntries.values().next().value;
+  if (!entry || selectedSftpEntries.size !== 1) return;
+  selectedEntry = entry;
+  selectedEntrySource = 'sftp';
+  renameSelectedItem();
+}
+
+async function deleteSftpSelection() {
+  const items = Array.from(selectedSftpEntries.values());
+  if (!items.length) return;
+  const ok = await showConfirm(
+    `Hapus ${items.length} item terpilih beserta seluruh isi foldernya?`,
+    'Hapus',
+    'Batal'
+  );
+  if (ok !== 'ok') return;
+  let deleted = 0;
+  let failure = null;
+  for (const item of items) {
+    try {
+      await callBridge(null, (id) => bridge.sftpDelete(id, item.path));
+      if (remoteFileHint === item.path || (remoteFileHint && remoteFileHint.startsWith(item.path + '/'))) {
+        remoteFileHint = null;
+      }
+      deleted += 1;
+    } catch (err) { failure = err; break; }
+  }
+  clearSftpSelection(false);
+  if (failure) items.slice(deleted).forEach((item) => selectedSftpEntries.set(item.path, item));
+  updateSftpSelectionUi();
+  listDir();
+  sftpToast(failure ? `${deleted} terhapus, gagal melanjutkan: ${failure.message}` : `${deleted} item terhapus`);
+}
+
 function downloadSelectedItem() {
   document.getElementById("sftp-item-dialog").close();
   if (!selectedEntry) return;
@@ -2113,6 +2200,11 @@ function downloadSelectedItem() {
 
 function renderEntries(entries) {
   currentSftpEntries = Array.isArray(entries) ? entries : [];
+  const visiblePaths = new Set(currentSftpEntries.map((entry) => entry.path));
+  Array.from(selectedSftpEntries.keys()).forEach((path) => {
+    if (!visiblePaths.has(path)) selectedSftpEntries.delete(path);
+  });
+  updateSftpSelectionUi();
   sftpListEl.innerHTML = '';
   if (!entries.length) { renderState('Folder kosong'); return; }
   entries.forEach((entry) => {
@@ -2218,9 +2310,12 @@ async function submitSftpInput(event) {
       const current = localStack[localStack.length - 1];
       if (!current) throw new Error('Folder lokal tidak tersedia');
       if (selectedEntry) {
+        const oldUri = selectedEntry.uri;
         const renamed = await callBridge(null, (id) => bridge.localRename(id, selectedEntry.uri, value));
         const stackItem = localStack.find((item) => item.uri === selectedEntry.uri);
         if (stackItem) { stackItem.uri = renamed.uri; stackItem.label = value; }
+        selectedLocalEntries.delete(oldUri);
+        updateLocalSelectionUi();
         if (renamed.active) fileNameInp.value = value;
         sftpToast('Nama diubah');
       } else {
@@ -2237,6 +2332,8 @@ async function submitSftpInput(event) {
           remoteFileHint = newPath + remoteFileHint.slice(oldPath.length);
           if (remoteFileHint === newPath) fileNameInp.value = value;
         }
+        selectedSftpEntries.delete(oldPath);
+        updateSftpSelectionUi();
         sftpToast('Nama diubah');
       } else if (pendingCreateKind === 'folder') {
         await callBridge(null, (id) => bridge.sftpCreateFolder(id, currentDir, value));

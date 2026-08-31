@@ -150,7 +150,7 @@
       <span id="local-path-label">/</span>
       <button class="icon-btn" type="button" onclick="refreshLocal()" aria-label="Refresh">↻</button>
     </div>
-    <div id="local-selection-bar" hidden><span id="local-selection-count">0 dipilih</span><button class="selection-action primary" type="button" onclick="downloadLocalSelection()">Download</button><button class="selection-action" type="button" onclick="clearLocalSelection()">Batal</button></div>
+    <div id="local-selection-bar" hidden><span id="local-selection-count">0 dipilih</span><button id="local-selection-rename" class="selection-action" type="button" onclick="renameLocalSelection()">Ubah nama</button><button class="selection-action primary" type="button" onclick="downloadLocalSelection()">Download</button><button class="selection-action danger" type="button" onclick="deleteLocalSelection()">Hapus</button><button class="selection-action" type="button" onclick="clearLocalSelection()">Batal</button></div>
     <div id="local-progress" aria-live="polite"></div>
     <div id="local-list" role="list"></div>
     <div id="local-action-menu">
@@ -165,7 +165,7 @@
   <div id="sftp-browser">
     <nav id="sftp-breadcrumb" aria-label="Lokasi remote"></nav>
     <div id="sftp-toolbar"><span id="sftp-path-label">/</span><button class="icon-btn" type="button" onclick="refreshSftp()" aria-label="Refresh">↻</button><button class="secondary-action" type="button" onclick="disconnectSftp()">Putus</button></div>
-    <div id="sftp-selection-bar" hidden><span id="sftp-selection-count">0 dipilih</span><button class="selection-action primary" type="button" onclick="downloadSftpSelection()">Download</button><button class="selection-action" type="button" onclick="clearSftpSelection()">Batal</button></div>
+    <div id="sftp-selection-bar" hidden><span id="sftp-selection-count">0 dipilih</span><button id="sftp-selection-rename" class="selection-action" type="button" onclick="renameSftpSelection()">Ubah nama</button><button class="selection-action primary" type="button" onclick="downloadSftpSelection()">Download</button><button class="selection-action danger" type="button" onclick="deleteSftpSelection()">Hapus</button><button class="selection-action" type="button" onclick="clearSftpSelection()">Batal</button></div>
     <div id="sftp-progress" aria-live="polite"></div>
     <div id="sftp-list" role="list"></div>
     <div id="sftp-action-menu">
@@ -297,4 +297,3 @@
 <script src="voidedit.js"></script>
 </body>
 </html>
-

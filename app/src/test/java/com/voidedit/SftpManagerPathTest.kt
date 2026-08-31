@@ -44,4 +44,12 @@ class SftpManagerPathTest {
         assertTrue(SftpManager.containsPath("/srv/project", "/srv/project/src/file.kt"))
         assertFalse(SftpManager.containsPath("/srv/project", "/srv/project-old/file.kt"))
     }
+
+    @Test
+    fun duplicateSanitizedZipPathsReceiveStableSuffixes() {
+        val used = mutableSetOf<String>()
+        assertEquals("assets/a_b.js", SftpManager.uniqueZipPath("assets/a_b.js", used))
+        assertEquals("assets/a_b (2).js", SftpManager.uniqueZipPath("assets/a_b.js", used))
+        assertEquals("assets/a_b (3).js", SftpManager.uniqueZipPath("assets/a_b.js", used))
+    }
 }

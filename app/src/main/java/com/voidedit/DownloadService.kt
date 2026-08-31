@@ -174,6 +174,7 @@ class DownloadService : Service() {
             if (intent.getBooleanExtra(EXTRA_ARCHIVE, false)) {
                 var completed = 0
                 var lastProgressAt = 0L
+                val usedPaths = mutableSetOf<String>()
                 ZipOutputStream(output.buffered()).use { zip ->
                     items.forEach { item ->
                         checkCancelled()
@@ -183,6 +184,7 @@ class DownloadService : Service() {
                             item.directory,
                             zip,
                             0,
+                            usedPaths,
                             checkCancelled
                         ) { label, finished ->
                             if (finished) completed += 1
@@ -268,12 +270,14 @@ class DownloadService : Service() {
         directory: Boolean,
         zip: ZipOutputStream,
         depth: Int,
+        usedPaths: MutableSet<String>,
         checkCancelled: () -> Unit,
         onEntry: (String, Boolean) -> Unit
     ) {
         checkCancelled()
         require(depth <= MAX_DOWNLOAD_DEPTH) { "Folder terlalu dalam untuk dijadikan ZIP" }
-        val zipName = if (directory) entryName.removeSuffix("/") + "/" else entryName
+        val uniqueEntryName = SftpManager.uniqueZipPath(entryName, usedPaths)
+        val zipName = if (directory) uniqueEntryName + "/" else uniqueEntryName
         onEntry(zipName, false)
         zip.putNextEntry(ZipEntry(zipName))
         if (!directory) copyLocalDocument(uri, zip, checkCancelled)
@@ -283,10 +287,11 @@ class DownloadService : Service() {
         listLocalChildren(uri).forEach { child ->
             writeLocalZipSource(
                 child.uri,
-                entryName + "/" + safeZipSegment(child.name),
+                uniqueEntryName + "/" + safeZipSegment(child.name),
                 child.directory,
                 zip,
                 depth + 1,
+                usedPaths,
                 checkCancelled,
                 onEntry
             )

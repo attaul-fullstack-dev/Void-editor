@@ -50,7 +50,9 @@ class LocalFolderBookmarkStore(context: Context) {
 
     fun rename(id: String, label: String) {
         require(label.isNotBlank()) { "Nama tidak boleh kosong" }
-        persist(list().map { if (it.id == id) it.copy(label = label.trim().take(60)) else it })
+        val current = list()
+        require(current.any { it.id == id }) { "Folder tersimpan tidak ditemukan" }
+        persist(current.map { if (it.id == id) it.copy(label = label.trim().take(60)) else it })
     }
 
     fun delete(id: String) = persist(list().filterNot { it.id == id })

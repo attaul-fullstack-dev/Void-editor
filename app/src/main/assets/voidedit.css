@@ -893,11 +893,13 @@
   .crumb { flex: 0 0 auto; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); padding: 6px 7px; font-size: 13px; cursor: pointer; }
   .crumb:last-child { color: var(--teal); background: var(--teal-dim); }
   #sftp-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
-  #sftp-selection-bar, #local-selection-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); }
+  #sftp-selection-bar, #local-selection-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); overflow-x: auto; }
   #sftp-selection-bar[hidden], #local-selection-bar[hidden] { display: none; }
   #sftp-selection-count, #local-selection-count { flex: 1; color: var(--teal); font-size: 12px; font-weight: 700; }
-  .selection-action { min-height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; cursor: pointer; }
+  .selection-action { flex: 0 0 auto; min-height: 34px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; cursor: pointer; }
   .selection-action.primary { border-color: transparent; background: var(--teal); color: var(--bg-base); }
+  .selection-action.danger { color: var(--err); border-color: rgba(239, 68, 68, .45); }
+  .selection-action[hidden] { display: none; }
   #sftp-path-label { flex: 1; min-width: 0; color: var(--text-muted); font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #sftp-list { flex: 1; overflow-y: auto; padding: 6px; }
   .file-row { width: 100%; display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; touch-action: pan-y; }

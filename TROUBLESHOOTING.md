@@ -462,3 +462,38 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 
 - `node --check app/src/main/assets/voidedit.js` lolos.
 - `git diff --check` lolos.
+
+## 2026-08-31 — Preview resource, aksi multi-select, dan collision ZIP
+
+### Gejala
+
+- HTML preview tampil, tetapi script, stylesheet, gambar relatif, link, dan navigasi form tidak berfungsi seperti project aslinya.
+- Multi-select SFTP/lokal hanya menyediakan Download dan Batal; pengguna harus menghapus item satu per satu dan rename sulit ditemukan.
+- Selection SFTP tetap menunjuk path lama setelah file hilang atau di-rename.
+- Context preview/resource lama dapat terbawa ketika konten baru dimuat lewat jalur non-native.
+- Download ZIP gagal total bila dua nama berbeda menjadi sama setelah karakter tidak aman disanitasi.
+- Rename bookmark yang ID-nya sudah hilang dilaporkan berhasil meski tidak mengubah apa pun.
+
+### Penyebab
+
+- `srcdoc` tidak memiliki base URL project, sehingga resource relatif mengarah ke asset aplikasi; `WebViewClient` juga membatalkan semua navigasi, termasuk subframe preview.
+- State origin preview dan target remote diubah terpisah dari pemuatan konten, sehingga tidak selalu ikut di-reset.
+- Selection bar belum mempunyai aksi hapus/rename dan renderer SFTP tidak membuang selection yang tidak lagi terlihat.
+- Nama entry ZIP dibersihkan tanpa collision resolution sebelum `ZipOutputStream.putNextEntry()`.
+- Store bookmark tidak memvalidasi keberadaan ID pada rename.
+
+### Solusi
+
+- Gunakan origin virtual `preview.voidedit.local` yang hanya memetakan request ke folder project aktif, baik SFTP maupun bookmark SAF, dengan MIME dan CORS yang sesuai; tolak segmen traversal dan backslash sebelum path diteruskan ke backend.
+- Tetap pertahankan iframe sandbox tanpa `allow-same-origin`; hanya navigasi main frame editor yang diblokir, sedangkan navigasi iframe diizinkan.
+- Reset target remote dan kemampuan resource sebagai satu bagian atomik dari setiap pemuatan konten.
+- Tambahkan Hapus pada multi-select SFTP/lokal, Rename ketika tepat satu item dipilih, konfirmasi batch, pelaporan partial failure, dan cleanup selection stale.
+- Beri suffix stabil ` (2)`, ` (3)`, dan seterusnya pada collision entry ZIP SFTP maupun lokal, lengkap dengan regression test.
+- Tolak rename bookmark yang ID-nya tidak ada.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- Audit handler HTML dan bridge JS–Kotlin lolos.
+- `git diff --check` lolos.
+- Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.

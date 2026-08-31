@@ -18,6 +18,7 @@ import android.util.Base64
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -34,6 +35,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -58,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activeRemotePath: String? = null
     @Volatile private var activeRemoteConnection: String? = null
     @Volatile private var connectedSftpConnection: String? = null
+    @Volatile private var activeLocalPreviewRoot: Uri? = null
 
     // True hanya selama penulisan berjalan (bukan saat dialog "Simpan sebagai" terbuka),
     // supaya dua permintaan Save beruntun tidak menulis file yang sama bersamaan.
@@ -172,6 +175,7 @@ class MainActivity : AppCompatActivity() {
         persistGrantedUriPermission(uri, data)
         activeRemotePath = null
         activeRemoteConnection = null
+        activeLocalPreviewRoot = null
         currentFileUri = uri
         writeToUri(uri, content)
     }
@@ -385,7 +389,40 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                request.isForMainFrame
+
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.url.host != PREVIEW_HOST) return null
+                if (request.method != "GET") return previewErrorResponse(405, "Method Not Allowed")
+                val relativePath = request.url.path?.removePrefix("/")?.let(::safePreviewRelativePath)
+                    ?: return previewErrorResponse(404, "Resource not found")
+                return runCatching {
+                    val remote = activeRemotePath?.takeIf {
+                        activeRemoteConnection != null && activeRemoteConnection == connectedSftpConnection
+                    }
+                    val (bytes, mime) = if (remote != null) {
+                        val previewRoot = remote.substringBeforeLast('/', "").ifEmpty { "/" }
+                        val path = SftpManager.join(previewRoot, relativePath)
+                        sftp.readBytes(path, MAX_PREVIEW_RESOURCE_BYTES) to previewMimeType(path)
+                    } else {
+                        val root = activeLocalPreviewRoot
+                            ?: return previewErrorResponse(404, "Preview source unavailable")
+                        val uri = resolveLocalPreviewUri(root, relativePath)
+                            ?: return previewErrorResponse(404, "Resource not found")
+                        readUriBytes(uri, MAX_PREVIEW_RESOURCE_BYTES) to
+                            (contentResolver.getType(uri) ?: previewMimeType(relativePath))
+                    }
+                    WebResourceResponse(
+                        mime,
+                        null,
+                        200,
+                        "OK",
+                        mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
+                        ByteArrayInputStream(bytes)
+                    )
+                }.getOrElse { previewErrorResponse(404, "Resource not found") }
+            }
             override fun onPageFinished(view: WebView, url: String) {
                 isWebViewReady = true
                 pendingLoadUri?.let {
@@ -446,7 +483,8 @@ class MainActivity : AppCompatActivity() {
             currentFileUri = uri
             activeRemotePath = null
             activeRemoteConnection = null
-            dispatchLoad(content, fileName, null)
+            activeLocalPreviewRoot = null
+            dispatchLoad(content, fileName, null, false)
         } catch (e: Exception) {
             toast("Gagal buka file: ${e.message}")
         }
@@ -488,6 +526,63 @@ class MainActivity : AppCompatActivity() {
         if (permission.isReadPermission) flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
         if (permission.isWritePermission) flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         if (flags != 0) runCatching { contentResolver.releasePersistableUriPermission(uri, flags) }
+    }
+
+    private fun previewErrorResponse(status: Int, reason: String) = WebResourceResponse(
+        "text/plain",
+        "UTF-8",
+        status,
+        reason,
+        mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
+        ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8))
+    )
+
+    private fun previewMimeType(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
+        "html", "htm" -> "text/html"
+        "css" -> "text/css"
+        "js", "mjs" -> "application/javascript"
+        "json", "map" -> "application/json"
+        "svg" -> "image/svg+xml"
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "ico" -> "image/x-icon"
+        "woff" -> "font/woff"
+        "woff2" -> "font/woff2"
+        "ttf" -> "font/ttf"
+        "wasm" -> "application/wasm"
+        else -> "application/octet-stream"
+    }
+
+    private fun safePreviewRelativePath(raw: String): String? {
+        if ('\\' in raw || '\u0000' in raw) return null
+        val segments = raw.split('/')
+        if (segments.any { it == ".." }) return null
+        return segments.filter { it.isNotBlank() && it != "." }.joinToString("/")
+    }
+
+    private fun resolveLocalPreviewUri(root: Uri, relativePath: String): Uri? {
+        var current = writableDocumentUri(root)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        )
+        relativePath.split('/').filter { it.isNotBlank() && it != "." }.forEach { segment ->
+            if (segment == "..") return null
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(current, documentIdOf(current))
+            var found: Uri? = null
+            contentResolver.query(children, projection, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(1) == segment) {
+                        found = DocumentsContract.buildDocumentUriUsingTree(current, cursor.getString(0))
+                        break
+                    }
+                }
+            }
+            current = found ?: return null
+        }
+        return current
     }
 
     // Kirim gambar ke viewer khusus di WebView (bukan textarea).
@@ -641,11 +736,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Kirim konten file ke editor via JSON agar aman terhadap backtick/backslash/Unicode.
-    private fun dispatchLoad(content: String, name: String, remotePath: String?) {
+    private fun dispatchLoad(content: String, name: String, remotePath: String?, previewResources: Boolean) {
         val payload = JSONObject()
             .put("content", content)
             .put("name", name)
             .put("remotePath", remotePath ?: JSONObject.NULL)
+            .put("previewResources", previewResources)
             .toString()
         webView.post {
             webView.evaluateJavascript("window.__voidLoadFile && window.__voidLoadFile(${jsPayload(payload)})", null)
@@ -1233,8 +1329,9 @@ class MainActivity : AppCompatActivity() {
                     onSuccess = { content ->
                         activeRemotePath = path
                         activeRemoteConnection = connectedSftpConnection
+                        activeLocalPreviewRoot = null
                         currentFileUri = null
-                        dispatchLoad(content, path.substringAfterLast('/'), path)
+                        dispatchLoad(content, path.substringAfterLast('/'), path, true)
                         emitResult(requestId, "open", true, JSONObject().put("path", path), null)
                     },
                     onFailure = { emitResult(requestId, "open", false, null, it.message ?: "Gagal membuka file") }
@@ -1731,7 +1828,7 @@ class MainActivity : AppCompatActivity() {
 
         /** Buka file lokal dari folder bookmark: teks ke editor, gambar ke viewer. */
         @JavascriptInterface
-        fun localOpen(requestId: String, uriString: String) {
+        fun localOpen(requestId: String, uriString: String, parentUriString: String) {
             scope.launch {
                 val uri = Uri.parse(uriString)
                 val prepared = withContext(Dispatchers.IO) {
@@ -1748,7 +1845,8 @@ class MainActivity : AppCompatActivity() {
                             currentFileUri = uri
                             activeRemotePath = null
                             activeRemoteConnection = null
-                            dispatchLoad(bytes.toString(Charsets.UTF_8), name, null)
+                            activeLocalPreviewRoot = parentUriString.takeIf { it.isNotBlank() }?.let(Uri::parse)
+                            dispatchLoad(bytes.toString(Charsets.UTF_8), name, null, activeLocalPreviewRoot != null)
                         } else {
                             dispatchImage(bytes, kind, name)
                         }
@@ -1840,6 +1938,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
+        const val PREVIEW_HOST = "preview.voidedit.local"
+        const val MAX_PREVIEW_RESOURCE_BYTES = 8L * 1024 * 1024
         const val MAX_LOCAL_DOWNLOAD_DEPTH = 256
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico")
 

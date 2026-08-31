@@ -44,6 +44,10 @@ let remoteFileHint = null;
 const MAX_HIGHLIGHT_CHARS = 120000;
 let syntaxSkipNotified = false;
 
+function syncDirtyState() {
+  isDirty = textarea.value !== lastSavedContent;
+}
+
 function renderSyntaxHighlight(code) {
   if (code.length > MAX_HIGHLIGHT_CHARS) {
     syntaxLayer.innerHTML = escHtml(code);
@@ -169,6 +173,7 @@ function restoreSnapshot(snap) {
   textarea.value = snap.val;
   textarea.selectionStart = textarea.selectionEnd = snap.pos;
   isUndoRedo = false;
+  syncDirtyState();
   fullUpdate();
   updateUndoRedoBtns();
 }
@@ -412,7 +417,7 @@ let isProgrammaticChange = false;
 textarea.addEventListener('input', () => {
   if (isProgrammaticChange) return;
   replacedRanges = [];
-  isDirty = true;
+  syncDirtyState();
   pushHistory(textarea.value);
   fullUpdate();
 });
@@ -434,6 +439,7 @@ textarea.addEventListener('keydown', (e) => {
     const v = textarea.value;
     textarea.value = v.slice(0, s) + '  ' + v.slice(textarea.selectionEnd);
     textarea.selectionStart = textarea.selectionEnd = s + 2;
+    syncDirtyState();
     pushHistory(textarea.value);
     fullUpdate();
   }
@@ -577,6 +583,7 @@ function replaceCurrent() {
   textarea.value = v.slice(0, pos) + r + v.slice(pos + q.length);
   textarea.selectionStart = textarea.selectionEnd = pos + r.length;
   isProgrammaticChange = false;
+  syncDirtyState();
   pushHistory(textarea.value);
 
   // Simpan replaced range
@@ -655,6 +662,7 @@ function replaceAll() {
   isProgrammaticChange = true;
   textarea.value = out;
   isProgrammaticChange = false;
+  syncDirtyState();
   pushHistory(textarea.value);
   // clearSearch dulu, lalu set replacedRanges (urutan penting!)
   clearSearch();
@@ -822,13 +830,15 @@ function performSave() {
     const done = new Promise((resolve) => {
       pendingRequests.set(SAVE_REQUEST_ID, {
         resolve: (data) => {
-          // Hanya tandai bersih bila isi editor belum berubah lagi sejak permintaan tadi.
-          if (textarea.value === snapshot) { isDirty = false; lastSavedContent = snapshot; }
+          // Snapshot ini sekarang benar-benar ada di disk/server. Bila user mengetik
+          // selama proses tulis, editor tetap dirty terhadap baseline baru tersebut.
+          lastSavedContent = snapshot;
+          syncDirtyState();
           sftpToast((data && data.target === 'remote') ? 'Tersimpan ke server' : 'Tersimpan');
           resolve(true);
         },
         reject: (err) => {
-          isDirty = true;
+          syncDirtyState();
           sftpToast('Gagal simpan: ' + err.message);
           resolve(false);
         }

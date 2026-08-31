@@ -412,3 +412,26 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 - `node --check app/src/main/assets/voidedit.js` lolos.
 - `git diff --check` lolos.
 - Build/unit test Android belum dapat dijalankan karena environment tidak menyediakan Java 17.
+
+## 2026-08-31 — Dirty-state editor salah untuk perubahan programmatic
+
+### Gejala
+
+- Menyisipkan Tab, Replace, Replace All, Undo, atau Redo dapat mengubah isi tanpa mengaktifkan peringatan perubahan belum disimpan.
+- Undo kembali tepat ke isi terakhir yang tersimpan masih dianggap memiliki perubahan.
+- Jika pengguna terus mengetik ketika Save berlangsung, snapshot yang berhasil ditulis tidak menjadi baseline baru.
+
+### Penyebab
+
+`isDirty` hanya diubah langsung oleh event `input` dan hasil Save. Perubahan yang menulis `textarea.value` secara programmatic tidak memicu event tersebut, sedangkan hasil Save hanya memperbarui `lastSavedContent` bila editor tidak berubah selama proses tulis.
+
+### Solusi
+
+- Tambahkan satu `syncDirtyState()` yang membandingkan isi editor dengan snapshot terakhir yang benar-benar tersimpan.
+- Panggil helper setelah input, Tab, Replace, Replace All, Undo, dan Redo.
+- Setiap Save sukses selalu memperbarui baseline ke snapshot yang ditulis, lalu menghitung ulang dirty-state terhadap isi editor terbaru.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.

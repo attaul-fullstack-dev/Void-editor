@@ -344,3 +344,71 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 1. `node --check app/src/main/assets/voidedit.js` — OK.
 2. Audit silang otomatis: 0 DOM id hilang, 0 handler HTML tanpa definisi, bridge JS↔Kotlin 40/40 cocok dua arah.
 3. `gradle :app:assembleDebug :app:assembleRelease` — BUILD SUCCESSFUL, tanpa warning maupun error.
+
+## 2026-08-31 — State file manager SFTP stale saat navigasi dan mutasi
+
+### Gejala
+
+- Respons listing folder lama dapat muncul setelah pengguna sudah berpindah folder.
+- Setelah file atau folder induknya di-rename, Save masih menulis ke path lama dan dapat membuat ulang nama lama.
+- Menghapus folder induk file yang sedang diedit tidak membersihkan target Save.
+- Membuka koneksi server lain saat file remote masih aktif berisiko mengarahkan Save ke server baru.
+- Kegagalan handshake setelah fingerprint yang benar diterima dapat salah dilaporkan sebagai perubahan fingerprint.
+
+### Penyebab
+
+- `listDir()` tidak mengikat respons asynchronous ke path dan versi navigasi yang memintanya.
+- `activeRemotePath` hanya dibersihkan saat path yang dihapus sama persis, serta tidak diperbarui saat rename.
+- Target editor tidak menyimpan identitas koneksi SFTP asalnya.
+- Penanganan error koneksi menganggap setiap kegagalan setelah host key terlihat sebagai mismatch, tanpa menyimpan hasil verifikasi sebenarnya.
+
+### Solusi
+
+- Tambahkan versi request listing dan abaikan respons yang path/versinya sudah stale.
+- Remap target editor untuk rename file maupun folder induk; bersihkan target untuk delete exact maupun descendant.
+- Ikat target editor ke identitas host, port, dan username; Save remote hanya berlaku pada koneksi yang sama dan target dibersihkan saat pindah server.
+- Bedakan host key yang benar-benar ditolak dari error handshake lain agar pesan fingerprint berubah hanya muncul saat mismatch nyata.
+- Tambahkan unit test regresi untuk remap rename serta deteksi subtree delete.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- Unit test Android memerlukan Java 17; environment Codex ini tidak menyediakan `java`/`JAVA_HOME`.
+
+## 2026-08-31 — Race condition Save, picker, download, dan explorer lokal
+
+### Gejala
+
+- Menekan Save lagi sebelum Save pertama selesai dapat membuat hasil request lama menandai snapshot baru sebagai tersimpan.
+- Memulai lebih dari satu download saat dialog izin notifikasi Android terbuka membuat callback download pertama hilang.
+- Kegagalan membuka pemilih folder membuat loading `Tambah jalur` tidak pernah selesai.
+- Respons listing folder lokal lama dapat menimpa isi folder yang baru dibuka.
+- File lokal yang sedang diedit kehilangan target Save setelah namanya diubah dari explorer.
+- Membuka file teks lain dari explorer menimpa perubahan editor tanpa konfirmasi.
+- Membuka lalu menutup viewer gambar menghapus target Save file teks yang masih terlihat di belakang overlay.
+
+### Penyebab
+
+- Semua Save memakai request ID tetap, tetapi handler Promise lama dihapus dan diganti sebelum native selesai.
+- Hanya ada satu slot callback izin notifikasi, sehingga permintaan berikutnya menimpa permintaan sebelumnya.
+- `pickFolderTree` tidak menangani kegagalan launcher maupun picker kedua yang dibuka bersamaan.
+- Listing SAF asynchronous tidak diikat ke URI dan versi navigasi pemintanya.
+- Hasil URI baru dari `DocumentsContract.renameDocument()` tidak diterapkan ke `currentFileUri`.
+- Alur buka file tidak memakai guard perubahan kotor, dan viewer gambar mengosongkan state sumber editor walau tidak mengganti kontennya.
+
+### Solusi
+
+- Deduplicasi Save selama satu request masih berjalan, dengan pertahanan tambahan di native saat dialog Save As terbuka.
+- Antrekan seluruh callback download selama izin notifikasi diminta, lalu jalankan semuanya setelah dialog selesai.
+- Selalu selesaikan request picker folder pada kegagalan dan tolak picker paralel secara eksplisit.
+- Abaikan hasil listing lokal yang versi atau URI-nya sudah stale.
+- Perbarui URI serta nama tampilan file lokal aktif setelah rename dan lepaskan target remote saat Save As memilih file lokal.
+- Minta konfirmasi sebelum file teks lain mengganti editor; opsi Simpan menunggu hasil tulis nyata sebelum membuka file.
+- Pertahankan target file teks saat viewer gambar dibuka karena viewer hanya overlay read-only.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- Build/unit test Android belum dapat dijalankan karena environment tidak menyediakan Java 17.

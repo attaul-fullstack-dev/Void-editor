@@ -72,11 +72,13 @@ class SftpManager {
         client.setConnectTimeout(15_000)
         client.setTimeout(30_000)
         var observed: String? = null
+        var hostKeyAccepted: Boolean? = null
         client.addHostKeyVerifier(object : net.schmizz.sshj.transport.verification.HostKeyVerifier {
     override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
         val fingerprint = fingerprint(key)
         observed = fingerprint
-        return config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint)
+        return (config.trustedFingerprint != null && constantTimeEquals(config.trustedFingerprint, fingerprint))
+            .also { hostKeyAccepted = it }
     }
 
     override fun findExistingAlgorithms(hostname: String, port: Int): List<String> {
@@ -91,7 +93,7 @@ class SftpManager {
                 pendingFingerprint = observed
                 return ConnectResult.HostKeyRequired(observed!!)
             }
-            if (observed != null && config.trustedFingerprint != null) {
+            if (hostKeyAccepted == false && config.trustedFingerprint != null) {
                 throw SecurityException("Fingerprint host berubah. Koneksi ditolak.", error)
             }
             throw error
@@ -378,6 +380,27 @@ class SftpManager {
 
         fun validateName(name: String) {
             require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name) { "Nama tidak valid" }
+        }
+
+        /** Perbarui target editor ketika file atau salah satu folder induknya di-rename. */
+        fun remapPathAfterRename(activePath: String?, from: String, to: String): String? {
+            if (activePath == null) return null
+            val active = normalize(activePath)
+            val source = normalize(from)
+            val target = normalize(to)
+            return when {
+                active == source -> target
+                active.startsWith("$source/") -> target + active.removePrefix(source)
+                else -> activePath
+            }
+        }
+
+        /** True bila path aktif ikut terhapus, termasuk saat folder induknya dihapus. */
+        fun containsPath(parent: String, candidate: String?): Boolean {
+            if (candidate == null) return false
+            val normalizedParent = normalize(parent)
+            val normalizedCandidate = normalize(candidate)
+            return normalizedCandidate == normalizedParent || normalizedCandidate.startsWith("$normalizedParent/")
         }
 
         private fun safeZipSegment(name: String): String {

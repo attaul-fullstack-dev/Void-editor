@@ -779,8 +779,7 @@ const imageView = document.getElementById('image-view');
 
 // Dipanggil native saat file gambar dibuka (SFTP, bookmark folder, atau Select document).
 window.__voidLoadImage = function (payload) {
-  // Native selalu mengosongkan activeRemotePath untuk gambar (hanya-baca) — cermin ikut kosong.
-  remoteFileHint = null;
+  // Viewer adalah overlay read-only. Target dan isi editor di belakangnya tetap dipertahankan.
   const name = payload.name || 'gambar';
   imageView.src = `data:${payload.mime || 'image/png'};base64,${payload.base64}`;
   imageView.alt = name;
@@ -808,6 +807,7 @@ function isImageName(name) {
  * Save yang gagal tanpa jejak (dulu hanya jalur remote yang punya handler).
  */
 const SAVE_REQUEST_ID = 'save-file';
+let saveInFlightPromise = null;
 
 // ── SAVE FILE (helper) ── mengembalikan Promise yang settle setelah hasil nyata diterima.
 function performSave() {
@@ -815,9 +815,10 @@ function performSave() {
 
   // Jika berjalan di dalam Android Wrapper
   if (window.AndroidBridge && window.AndroidBridge.onSaveRequest) {
+    // Satu request native memakai satu requestId tetap. Mengganti handler ketika Save
+    // pertama belum selesai dapat membuat hasil tulis lama menandai snapshot baru tersimpan.
+    if (saveInFlightPromise) return saveInFlightPromise;
     const snapshot = textarea.value;
-    // Sesi Save sebelumnya (mis. dialog "Simpan sebagai" ditinggalkan) dibuang dulu.
-    pendingRequests.delete(SAVE_REQUEST_ID);
     const done = new Promise((resolve) => {
       pendingRequests.set(SAVE_REQUEST_ID, {
         resolve: (data) => {
@@ -833,14 +834,18 @@ function performSave() {
         }
       });
     });
+    const tracked = done.finally(() => {
+      if (saveInFlightPromise === tracked) saveInFlightPromise = null;
+    });
+    saveInFlightPromise = tracked;
     try {
       window.AndroidBridge.onSaveRequest(snapshot, name);
     } catch (err) {
+      const pending = pendingRequests.get(SAVE_REQUEST_ID);
       pendingRequests.delete(SAVE_REQUEST_ID);
-      sftpToast('Gagal simpan: jembatan Android tidak merespons');
-      return Promise.resolve(false);
+      if (pending) pending.reject(new Error('Jembatan Android tidak merespons'));
     }
-    return done;
+    return tracked;
   }
 
   const blob = new Blob([textarea.value], { type: 'text/plain' });
@@ -1137,8 +1142,10 @@ let pendingCreateKind = null;       // 'file' | 'folder'
 const pendingRequests = new Map();  // requestId -> {resolve, reject}
 let requestSeq = 0;
 let currentSftpEntries = [];
+let sftpListRequestVersion = 0;
 const selectedSftpEntries = new Map();
 let currentLocalEntries = [];
+let localListRequestVersion = 0;
 const selectedLocalEntries = new Map();
 
 const settings = { sortAscending: true, showHidden: false, autoList: true };
@@ -1388,8 +1395,9 @@ function openConnectForm(saved) {
 }
 
 /* ── Fitur C: Select document ── */
-function selectDocument() {
+async function selectDocument() {
   if (!bridge.pickLocalDocument) { sftpToast('Fitur ini butuh versi aplikasi terbaru'); return; }
+  if (!await confirmReplaceEditor()) return;
   bridge.pickLocalDocument();
   closeSftpPanel();
 }
@@ -1650,16 +1658,23 @@ function renderLocalState(message) {
 async function loadLocalList() {
   const current = localStack[localStack.length - 1];
   if (!current) { showExplorerView('home'); renderExplorerHome(); return; }
+  const requestedUri = current.uri;
+  const requestVersion = ++localListRequestVersion;
   document.getElementById('local-path-label').textContent =
     localStack.map((item) => item.label).join(' / ');
   renderLocalState('Memuat…');
   try {
     // showHidden dikirim eksplisit — nilai yang sama dipakai sftpList, jadi toggle
     // "tampilkan berkas tersembunyi" berlaku identik di folder bookmark lokal.
-    const entries = await callBridge(null, (id) => bridge.localList(id, current.uri, settings.showHidden));
+    const entries = await callBridge(null, (id) => bridge.localList(id, requestedUri, settings.showHidden));
+    const visible = localStack[localStack.length - 1];
+    if (requestVersion !== localListRequestVersion || !visible || visible.uri !== requestedUri) return;
     renderLocalEntries(entries || []);
   } catch (err) {
-    renderLocalState('Gagal memuat: ' + err.message);
+    const visible = localStack[localStack.length - 1];
+    if (requestVersion === localListRequestVersion && visible && visible.uri === requestedUri) {
+      renderLocalState('Gagal memuat: ' + err.message);
+    }
   }
 }
 
@@ -1758,6 +1773,7 @@ function renderLocalEntries(entries) {
 
 // Native memutuskan sendiri: teks → editor, gambar → viewer (Fitur D.1).
 async function openLocalFile(entry) {
+  if (!isImageName(entry.name) && !await confirmReplaceEditor()) return;
   sftpToast('Membuka ' + entry.name + '…');
   try {
     await callBridge(null, (id) => bridge.localOpen(id, entry.uri));
@@ -1907,6 +1923,7 @@ function onConnected(config, home, options) {
 }
 
 async function disconnectSftp() {
+  sftpListRequestVersion += 1;
   clearSftpSelection(false);
   try { await callBridge(null, (id) => bridge.sftpDisconnect(id)); } catch (_) {}
   sftpConnected = false;
@@ -1918,6 +1935,9 @@ async function disconnectSftp() {
 }
 
 function navigateTo(path) {
+  // Batalkan hasil listing folder sebelumnya. Request native tidak bisa dibatalkan,
+  // tetapi responsnya tidak boleh menimpa folder yang kini sedang ditampilkan.
+  sftpListRequestVersion += 1;
   clearSftpSelection(false);
   currentDir = path || '/';
   renderBreadcrumb();
@@ -1962,11 +1982,18 @@ function renderRefreshPrompt() {
 }
 
 async function listDir() {
+  const requestedPath = currentDir;
+  const requestVersion = ++sftpListRequestVersion;
   renderState('Memuat…');
   try {
-    const entries = await callBridge(null, (id) => bridge.sftpList(id, currentDir, settings.showHidden, settings.sortAscending));
+    const entries = await callBridge(null, (id) => bridge.sftpList(id, requestedPath, settings.showHidden, settings.sortAscending));
+    if (requestVersion !== sftpListRequestVersion || requestedPath !== currentDir) return;
     renderEntries(entries || []);
-  } catch (err) { renderState('Gagal memuat: ' + err.message); }
+  } catch (err) {
+    if (requestVersion === sftpListRequestVersion && requestedPath === currentDir) {
+      renderState('Gagal memuat: ' + err.message);
+    }
+  }
 }
 function refreshSftp() { if (sftpConnected) listDir(); }
 
@@ -2118,6 +2145,7 @@ function attachRowGestures(row, entry) {
 async function openRemoteFile(entry) {
   const image = isImageName(entry.name);
   if (image && !bridge.sftpOpenImage) { sftpToast('Fitur ini butuh versi aplikasi terbaru'); return; }
+  if (!image && !await confirmReplaceEditor()) return;
   sftpToast('Membuka ' + entry.name + '…');
   try {
     await callBridge(null, (id) =>
@@ -2125,6 +2153,18 @@ async function openRemoteFile(entry) {
     );
     closeSftpPanel();
   } catch (err) { sftpToast(err.message); }
+}
+
+async function confirmReplaceEditor() {
+  if (!isDirty) return true;
+  const result = await showConfirm(
+    'File saat ini memiliki perubahan yang belum disimpan.',
+    'Simpan lalu Buka',
+    'Batal',
+    'Buka Tanpa Simpan'
+  );
+  if (result === 'ok') return performSave();
+  return result === 'discard';
 }
 
 /* ── Menu tambah ── */
@@ -2158,6 +2198,7 @@ async function submitSftpInput(event) {
         const renamed = await callBridge(null, (id) => bridge.localRename(id, selectedEntry.uri, value));
         const stackItem = localStack.find((item) => item.uri === selectedEntry.uri);
         if (stackItem) { stackItem.uri = renamed.uri; stackItem.label = value; }
+        if (renamed.active) fileNameInp.value = value;
         sftpToast('Nama diubah');
       } else {
         await callBridge(null, (id) => bridge.localCreate(id, current.uri, value, pendingCreateKind === 'folder'));
@@ -2166,7 +2207,13 @@ async function submitSftpInput(event) {
       loadLocalList();
     } else {
       if (selectedEntry) {
-        await callBridge(null, (id) => bridge.sftpRename(id, currentDir, selectedEntry.name, value));
+        const oldPath = selectedEntry.path;
+        const renamed = await callBridge(null, (id) => bridge.sftpRename(id, currentDir, selectedEntry.name, value));
+        const newPath = renamed.path;
+        if (remoteFileHint === oldPath || (remoteFileHint && remoteFileHint.startsWith(oldPath + '/'))) {
+          remoteFileHint = newPath + remoteFileHint.slice(oldPath.length);
+          if (remoteFileHint === newPath) fileNameInp.value = value;
+        }
         sftpToast('Nama diubah');
       } else if (pendingCreateKind === 'folder') {
         await callBridge(null, (id) => bridge.sftpCreateFolder(id, currentDir, value));
@@ -2234,7 +2281,9 @@ async function deleteSelectedItem() {
       loadLocalList();
     } else {
       await callBridge(null, (id) => bridge.sftpDelete(id, entry.path));
-      if (remoteFileHint === entry.path) remoteFileHint = null;
+      if (remoteFileHint === entry.path || (remoteFileHint && remoteFileHint.startsWith(entry.path + '/'))) {
+        remoteFileHint = null;
+      }
       listDir();
     }
     sftpToast('Terhapus');

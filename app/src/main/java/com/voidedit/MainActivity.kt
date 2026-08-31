@@ -43,7 +43,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
-    private var currentFileUri: Uri? = null
+    @Volatile private var currentFileUri: Uri? = null
     private var isWebViewReady = false
     private var pendingLoadUri: Uri? = null
     private var pendingWriteContent: String? = null
@@ -55,7 +55,9 @@ class MainActivity : AppCompatActivity() {
     private val bookmarkStore by lazy { LocalFolderBookmarkStore(this) }
 
     // Remote path yang sedang dibuka. Jika tidak null, tombol Save menulis ke server.
-    private var activeRemotePath: String? = null
+    @Volatile private var activeRemotePath: String? = null
+    @Volatile private var activeRemoteConnection: String? = null
+    @Volatile private var connectedSftpConnection: String? = null
 
     // True hanya selama penulisan berjalan (bukan saat dialog "Simpan sebagai" terbuka),
     // supaya dua permintaan Save beruntun tidak menulis file yang sama bersamaan.
@@ -102,15 +104,13 @@ class MainActivity : AppCompatActivity() {
     )
 
     private var pendingLocalDownload: PendingLocalDownload? = null
-    private var pendingDownloadStart: (() -> Unit)? = null
+    private val pendingDownloadStarts = mutableListOf<() -> Unit>()
     private var downloadReceiverRegistered = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        val start = pendingDownloadStart
-        pendingDownloadStart = null
-        start?.invoke()
+        drainPendingDownloadStarts()
     }
 
     private val downloadEvents = object : BroadcastReceiver() {
@@ -178,6 +178,8 @@ class MainActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         } catch (_: Exception) {}
+        activeRemotePath = null
+        activeRemoteConnection = null
         currentFileUri = uri
         writeToUri(uri, content)
     }
@@ -453,14 +455,13 @@ class MainActivity : AppCompatActivity() {
             // Gambar tidak punya mode edit teks: langsung tampilkan viewer (Fitur D.1).
             if (isImage(fileName, contentResolver.getType(uri))) {
                 val bytes = readUriBytes(uri)
-                currentFileUri = null
-                activeRemotePath = null
                 dispatchImage(bytes, mimeFor(fileName, contentResolver.getType(uri)), fileName)
                 return
             }
             val content = readUriText(uri)
             currentFileUri = uri
             activeRemotePath = null
+            activeRemoteConnection = null
             dispatchLoad(content, fileName, null)
         } catch (e: Exception) {
             toast("Gagal buka file: ${e.message}")
@@ -768,16 +769,22 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            pendingDownloadStart = start
+            pendingDownloadStarts += start
+            if (pendingDownloadStarts.size > 1) return
             runCatching {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }.onFailure {
-                pendingDownloadStart = null
-                start()
+                drainPendingDownloadStarts()
             }
         } else {
             start()
         }
+    }
+
+    private fun drainPendingDownloadStarts() {
+        val starts = pendingDownloadStarts.toList()
+        pendingDownloadStarts.clear()
+        starts.forEach { it.invoke() }
     }
 
     private fun discardCreatedOutput(uri: Uri) {
@@ -1111,11 +1118,13 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun onSaveRequest(content: String, fileName: String) {
             runOnUiThread {
-                if (isWriting) {
+                if (isWriting || pendingWriteContent != null) {
                     emitResult(SAVE_REQUEST_ID, "save", false, null, "Penyimpanan sebelumnya masih berjalan")
                     return@runOnUiThread
                 }
-                val remote = activeRemotePath
+                val remote = activeRemotePath?.takeIf {
+                    activeRemoteConnection != null && activeRemoteConnection == connectedSftpConnection
+                }
                 if (remote != null) {
                     isWriting = true
                     scope.launch {
@@ -1171,8 +1180,10 @@ class MainActivity : AppCompatActivity() {
                 val port = json.optInt("port", 22)
                 val config = configFromJson(json, trustedFingerprint(host, port))
                 when (val outcome = sftp.connect(config)) {
-                    is SftpManager.ConnectResult.Connected ->
+                    is SftpManager.ConnectResult.Connected -> {
+                        recordConnectedSftp(config)
                         JSONObject().put("status", "connected").put("home", outcome.home)
+                    }
                     is SftpManager.ConnectResult.HostKeyRequired ->
                         JSONObject().put("status", "hostKey").put("fingerprint", outcome.fingerprint)
                 }
@@ -1198,8 +1209,10 @@ class MainActivity : AppCompatActivity() {
                     trustedFingerprint = fingerprint
                 )
                 when (val outcome = sftp.connect(config)) {
-                    is SftpManager.ConnectResult.Connected ->
+                    is SftpManager.ConnectResult.Connected -> {
+                        recordConnectedSftp(config)
                         JSONObject().put("status", "connected").put("home", outcome.home)
+                    }
                     is SftpManager.ConnectResult.HostKeyRequired ->
                         JSONObject().put("status", "hostKey").put("fingerprint", outcome.fingerprint)
                 }
@@ -1218,6 +1231,7 @@ class MainActivity : AppCompatActivity() {
                 result.fold(
                     onSuccess = { content ->
                         activeRemotePath = path
+                        activeRemoteConnection = connectedSftpConnection
                         currentFileUri = null
                         dispatchLoad(content, path.substringAfterLast('/'), path)
                         emitResult(requestId, "open", true, JSONObject().put("path", path), null)
@@ -1251,7 +1265,9 @@ class MainActivity : AppCompatActivity() {
                 SftpManager.validateName(newName)
                 val from = SftpManager.join(parent, oldName)
                 val to = SftpManager.join(parent, newName)
-                sftp.rename(from, to); JSONObject().put("path", to)
+                sftp.rename(from, to)
+                activeRemotePath = SftpManager.remapPathAfterRename(activeRemotePath, from, to)
+                JSONObject().put("path", to)
             }
         }
 
@@ -1259,7 +1275,10 @@ class MainActivity : AppCompatActivity() {
         fun sftpDelete(requestId: String, path: String) {
             runSftp(requestId, "delete") {
                 sftp.delete(path)
-                if (activeRemotePath == path) runOnUiThread { activeRemotePath = null }
+                if (SftpManager.containsPath(path, activeRemotePath)) {
+                    activeRemotePath = null
+                    activeRemoteConnection = null
+                }
                 JSONObject().put("path", path)
             }
         }
@@ -1322,7 +1341,11 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun sftpDisconnect(requestId: String) {
-            runSftp(requestId, "disconnect") { sftp.disconnect(); JSONObject().put("status", "disconnected") }
+            runSftp(requestId, "disconnect") {
+                sftp.disconnect()
+                connectedSftpConnection = null
+                JSONObject().put("status", "disconnected")
+            }
         }
 
         // Pilih file lalu upload ke direktori remote aktif.
@@ -1493,8 +1516,6 @@ class MainActivity : AppCompatActivity() {
                 result.fold(
                     onSuccess = { bytes ->
                         val name = path.substringAfterLast('/')
-                        activeRemotePath = null   // gambar bersifat read-only
-                        currentFileUri = null
                         dispatchImage(bytes, mimeFor(name, null), name)
                         emitResult(requestId, "openImage", true, JSONObject().put("path", path), null)
                     },
@@ -1508,8 +1529,23 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun pickFolderTree(requestId: String) {
             runOnUiThread {
+                if (pendingTreeRequestId != null) {
+                    emitResult(requestId, "pickTree", false, null, "Pemilih folder masih terbuka")
+                    return@runOnUiThread
+                }
                 pendingTreeRequestId = requestId
-                treePickerLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+                runCatching {
+                    treePickerLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+                }.onFailure { error ->
+                    pendingTreeRequestId = null
+                    emitResult(
+                        requestId,
+                        "pickTree",
+                        false,
+                        null,
+                        error.message ?: "Pemilih folder tidak tersedia"
+                    )
+                }
             }
         }
 
@@ -1557,9 +1593,14 @@ class MainActivity : AppCompatActivity() {
         fun localRename(requestId: String, uriString: String, newName: String) {
             runTask(requestId, "localRename") {
                 validateDocumentName(newName.trim())
-                val renamed = DocumentsContract.renameDocument(contentResolver, Uri.parse(uriString), newName.trim())
+                val source = Uri.parse(uriString)
+                val wasActive = currentFileUri == source
+                val renamed = DocumentsContract.renameDocument(contentResolver, source, newName.trim())
                     ?: error("Item tidak dapat diubah namanya")
-                JSONObject().put("uri", renamed.toString())
+                if (wasActive) runOnUiThread {
+                    if (currentFileUri == source) currentFileUri = renamed
+                }
+                JSONObject().put("uri", renamed.toString()).put("active", wasActive)
             }
         }
 
@@ -1692,10 +1733,9 @@ class MainActivity : AppCompatActivity() {
                         if (kind == "text") {
                             currentFileUri = uri
                             activeRemotePath = null
+                            activeRemoteConnection = null
                             dispatchLoad(bytes.toString(Charsets.UTF_8), name, null)
                         } else {
-                            currentFileUri = null
-                            activeRemotePath = null
                             dispatchImage(bytes, kind, name)
                         }
                         emitResult(requestId, "localOpen", true, JSONObject().put("name", name), null)
@@ -1767,11 +1807,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun connectOutcome(config: SftpManager.Config, label: String): JSONObject =
         when (val outcome = sftp.connect(config)) {
-            is SftpManager.ConnectResult.Connected ->
+            is SftpManager.ConnectResult.Connected -> {
+                recordConnectedSftp(config)
                 JSONObject().put("status", "connected").put("home", outcome.home).put("label", label)
+            }
             is SftpManager.ConnectResult.HostKeyRequired ->
                 JSONObject().put("status", "hostKey").put("fingerprint", outcome.fingerprint)
         }
+
+    private fun recordConnectedSftp(config: SftpManager.Config) {
+        val connection = listOf(config.host.trim().lowercase(), config.port.toString(), config.username.trim())
+            .joinToString("\u0000")
+        connectedSftpConnection = connection
+        if (activeRemoteConnection != null && activeRemoteConnection != connection) {
+            activeRemotePath = null
+            activeRemoteConnection = null
+        }
+    }
 
     private companion object {
         const val MAX_LOCAL_DOWNLOAD_DEPTH = 256

@@ -214,13 +214,8 @@
     <button class="overlay-back" type="button" onclick="closePreview()">‹ Kembali</button>
     <span class="overlay-name" id="preview-name"></span>
   </div>
-  <!-- allow-scripts TANPA allow-same-origin: script halaman jalan, tapi origin opaque
-       sehingga preview tidak bisa menyentuh DOM/localStorage editor.
-       CATATAN KEAMANAN: sebelumnya "allow-same-origin" ikut dipasang bersama
-       "allow-scripts" — kombinasi itu membatalkan seluruh isolasi sandbox. File HTML
-       yang dipreview (bisa berasal dari server SFTP mana pun) jadi bisa membaca
-       parent.document, mencuri kredensial SFTP di form, dan memanggil AndroidBridge.
-       Jangan pernah menambahkan allow-same-origin di sini lagi. -->
+  <!-- Browser fallback memakai srcdoc ber-origin opaque. Aplikasi Android memakai
+       WebView preview terpisah tanpa AndroidBridge agar API origin dapat bekerja aman. -->
   <iframe id="preview-frame" title="Preview" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-modals"></iframe>
 </section>
 

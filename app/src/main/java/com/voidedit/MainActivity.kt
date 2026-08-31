@@ -14,6 +14,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.graphics.Color
+import android.view.Gravity
 import android.util.Base64
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -23,6 +25,10 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -45,6 +51,9 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var rootContainer: FrameLayout
+    private var nativePreviewContainer: ViewGroup? = null
+    private var nativePreviewWebView: WebView? = null
     @Volatile private var currentFileUri: Uri? = null
     private var isWebViewReady = false
     private var pendingLoadUri: Uri? = null
@@ -62,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activeRemoteConnection: String? = null
     @Volatile private var connectedSftpConnection: String? = null
     @Volatile private var activeLocalPreviewRoot: Uri? = null
+    @Volatile private var activePreviewDocument: String? = null
 
     // True hanya selama penulisan berjalan (bukan saat dialog "Simpan sebagai" terbuka),
     // supaya dua permintaan Save beruntun tidak menulis file yang sama bersamaan.
@@ -360,8 +370,10 @@ class MainActivity : AppCompatActivity() {
 
     supportActionBar?.hide()
 
+        rootContainer = FrameLayout(this)
         webView = WebView(this)
-        setContentView(webView)
+        rootContainer.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        setContentView(rootContainer)
 
         ContextCompat.registerReceiver(
             this,
@@ -400,37 +412,8 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                 request.isForMainFrame
 
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                if (request.url.host != PREVIEW_HOST) return null
-                if (request.method != "GET") return previewErrorResponse(405, "Method Not Allowed")
-                val relativePath = request.url.path?.removePrefix("/")?.let(::safePreviewRelativePath)
-                    ?: return previewErrorResponse(404, "Resource not found")
-                return runCatching {
-                    val remote = activeRemotePath?.takeIf {
-                        activeRemoteConnection != null && activeRemoteConnection == connectedSftpConnection
-                    }
-                    val (bytes, mime) = if (remote != null) {
-                        val previewRoot = remote.substringBeforeLast('/', "").ifEmpty { "/" }
-                        val path = SftpManager.join(previewRoot, relativePath)
-                        sftp.readBytes(path, MAX_PREVIEW_RESOURCE_BYTES) to previewMimeType(path)
-                    } else {
-                        val root = activeLocalPreviewRoot
-                            ?: return previewErrorResponse(404, "Preview source unavailable")
-                        val uri = resolveLocalPreviewUri(root, relativePath)
-                            ?: return previewErrorResponse(404, "Resource not found")
-                        readUriBytes(uri, MAX_PREVIEW_RESOURCE_BYTES) to
-                            (contentResolver.getType(uri) ?: previewMimeType(relativePath))
-                    }
-                    WebResourceResponse(
-                        mime,
-                        null,
-                        200,
-                        "OK",
-                        mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
-                        ByteArrayInputStream(bytes)
-                    )
-                }.getOrElse { previewErrorResponse(404, "Resource not found") }
-            }
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                interceptPreviewRequest(request)
             override fun onPageFinished(view: WebView, url: String) {
                 isWebViewReady = true
                 pendingLoadUri?.let {
@@ -459,6 +442,7 @@ class MainActivity : AppCompatActivity() {
         // Download berjalan di DownloadService dan tidak dibatalkan bersama Activity.
         scope.cancel()
         runCatching { sftp.disconnect() }
+        closeNativePreview()
         // WebView memegang referensi ke Activity; tanpa destroy() proses renderer dan
         // Activity ikut tertahan (memory leak) setiap kali Activity dibuat ulang.
         runCatching {
@@ -573,6 +557,115 @@ class MainActivity : AppCompatActivity() {
         mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
         ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8))
     )
+
+    private fun interceptPreviewRequest(request: WebResourceRequest): WebResourceResponse? {
+        if (request.url.host != PREVIEW_HOST) return null
+        if (request.method != "GET") return previewErrorResponse(405, "Method Not Allowed")
+        val relativePath = request.url.path?.removePrefix("/")?.let(::safePreviewRelativePath)
+            ?: return previewErrorResponse(404, "Resource not found")
+        if (relativePath == PREVIEW_DOCUMENT_PATH) {
+            val document = activePreviewDocument
+                ?: return previewErrorResponse(404, "Preview document unavailable")
+            return WebResourceResponse(
+                "text/html", "UTF-8", 200, "OK",
+                mapOf("Cache-Control" to "no-store"),
+                ByteArrayInputStream(document.toByteArray(Charsets.UTF_8))
+            )
+        }
+        return runCatching {
+            val remote = activeRemotePath?.takeIf {
+                activeRemoteConnection != null && activeRemoteConnection == connectedSftpConnection
+            }
+            val (bytes, mime) = if (remote != null) {
+                val previewRoot = remote.substringBeforeLast('/', "").ifEmpty { "/" }
+                val path = SftpManager.join(previewRoot, relativePath)
+                sftp.readBytes(path, MAX_PREVIEW_RESOURCE_BYTES) to previewMimeType(path)
+            } else {
+                val root = activeLocalPreviewRoot
+                    ?: return previewErrorResponse(404, "Preview source unavailable")
+                val uri = resolveLocalPreviewUri(root, relativePath)
+                    ?: return previewErrorResponse(404, "Resource not found")
+                readUriBytes(uri, MAX_PREVIEW_RESOURCE_BYTES) to
+                    (contentResolver.getType(uri) ?: previewMimeType(relativePath))
+            }
+            WebResourceResponse(
+                mime, null, 200, "OK",
+                mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store"),
+                ByteArrayInputStream(bytes)
+            )
+        }.getOrElse { previewErrorResponse(404, "Resource not found") }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showNativePreview(document: String, name: String) {
+        closeNativePreview()
+        activePreviewDocument = document
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(13, 13, 13))
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(6), dp(12), dp(6))
+            setBackgroundColor(Color.rgb(20, 20, 20))
+        }
+        val back = Button(this).apply {
+            text = "‹ Kembali"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(39, 39, 42))
+            setOnClickListener { closeNativePreview() }
+        }
+        val title = TextView(this).apply {
+            text = name
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            maxLines = 1
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        toolbar.addView(back, LinearLayout.LayoutParams(-2, -1))
+        toolbar.addView(title, LinearLayout.LayoutParams(0, -1, 1f))
+
+        val preview = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.setSupportZoom(true)
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                    request.url.scheme !in setOf("http", "https")
+
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest
+                ): WebResourceResponse? = interceptPreviewRequest(request)
+            }
+        }
+        container.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
+        container.addView(preview, LinearLayout.LayoutParams(-1, 0, 1f))
+        rootContainer.addView(container, FrameLayout.LayoutParams(-1, -1))
+        nativePreviewContainer = container
+        nativePreviewWebView = preview
+        preview.loadUrl("https://$PREVIEW_HOST/$PREVIEW_DOCUMENT_PATH?v=${System.currentTimeMillis()}")
+    }
+
+    private fun closeNativePreview() {
+        val preview = nativePreviewWebView
+        nativePreviewWebView = null
+        nativePreviewContainer?.let { rootContainer.removeView(it) }
+        nativePreviewContainer = null
+        activePreviewDocument = null
+        runCatching {
+            preview?.stopLoading()
+            preview?.destroy()
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun previewMimeType(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
         "html", "htm" -> "text/html"
@@ -1248,6 +1341,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class AndroidBridge {
+        @JavascriptInterface
+        fun showPreviewDocument(document: String, name: String) {
+            runOnUiThread { showNativePreview(document, name) }
+        }
+
         /**
          * Satu-satunya jalur Save. Hasilnya SELALU dilaporkan ke WebView lewat requestId
          * tetap SAVE_REQUEST_ID + Toast native, baik untuk SFTP, file lokal, maupun
@@ -2008,6 +2106,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val PREVIEW_HOST = "preview.voidedit.local"
+        const val PREVIEW_DOCUMENT_PATH = "__void_preview__.html"
         const val MAX_PREVIEW_RESOURCE_BYTES = 8L * 1024 * 1024
         const val MAX_LOCAL_DOWNLOAD_DEPTH = 256
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico")
@@ -2027,6 +2126,10 @@ class MainActivity : AppCompatActivity() {
      */
     private val backCallback = object : androidx.activity.OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
+            if (nativePreviewContainer != null) {
+                closeNativePreview()
+                return
+            }
             if (!isWebViewReady) {
                 finishFromBack()
                 return

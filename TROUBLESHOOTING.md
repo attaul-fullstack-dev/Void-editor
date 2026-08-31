@@ -485,7 +485,7 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 ### Solusi
 
 - Gunakan origin virtual `preview.voidedit.local` yang hanya memetakan request ke folder project aktif, baik SFTP maupun bookmark SAF, dengan MIME dan CORS yang sesuai; tolak segmen traversal dan backslash sebelum path diteruskan ke backend.
-- Tetap pertahankan iframe sandbox tanpa `allow-same-origin`; hanya navigasi main frame editor yang diblokir, sedangkan navigasi iframe diizinkan.
+- Browser fallback tetap memakai iframe sandbox tanpa `allow-same-origin`; aplikasi Android memakai WebView preview terpisah tanpa bridge native.
 - Reset target remote dan kemampuan resource sebagai satu bagian atomik dari setiap pemuatan konten.
 - Tambahkan Hapus pada multi-select SFTP/lokal, Rename ketika tepat satu item dipilih, konfirmasi batch, pelaporan partial failure, dan cleanup selection stale.
 - Beri suffix stabil ` (2)`, ` (3)`, dan seterusnya pada collision entry ZIP SFTP maupun lokal, lengkap dengan regression test.
@@ -557,3 +557,29 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 - Audit handler HTML, DOM id, bridge JS–Kotlin, dan kesamaan metrik empat layer editor lolos.
 - `git diff --check` lolos.
 - Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.
+
+## 2026-08-31 — Aplikasi HTML preview tidak interaktif
+
+### Gejala
+
+- HTML tampil di preview, tetapi tombol dan fitur aplikasinya tidak bekerja.
+- Script yang mengakses `localStorage`, ES module, atau API yang membutuhkan origin berhenti saat inisialisasi.
+
+### Penyebab
+
+- Preview Android masih dirender melalui `iframe.srcdoc` dengan sandbox tanpa `allow-same-origin`, sehingga dokumen mendapat opaque origin.
+- Menambahkan `allow-same-origin` ke iframe utama bukan solusi aman karena `AndroidBridge` WebView tersedia untuk semua frame dan preview berasal dari file yang tidak dipercaya.
+
+### Solusi
+
+- Render preview Android di WebView layar penuh yang terpisah dan sama sekali tidak diberi `AndroidBridge`.
+- Sajikan isi editor dan resource project melalui origin virtual HTTPS `preview.voidedit.local`, sehingga JavaScript, localStorage, module, CSS, gambar, serta navigasi file project bekerja dengan origin normal.
+- Blok navigasi preview ke skema non-HTTP(S), nonaktifkan akses file/content langsung, dan pertahankan iframe opaque hanya sebagai fallback browser biasa.
+- Hancurkan WebView preview saat tombol kembali, Back Android, atau Activity ditutup.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- Audit handler HTML, DOM id, dan bridge JS–Kotlin lolos.
+- `git diff --check` lolos.
+- Build Android memerlukan Java 17 yang tidak tersedia di environment ini.

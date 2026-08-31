@@ -730,6 +730,7 @@ window.__voidLoadFile = function (payload) {
 const previewOverlay = document.getElementById('preview-overlay');
 const previewFrame = document.getElementById('preview-frame');
 const btnPreview = document.getElementById('btn-preview');
+const PREVIEW_SANDBOX_SAFE = 'allow-scripts allow-forms allow-modals';
 
 function fileExt(name) { return (name || '').split('.').pop().toLowerCase(); }
 
@@ -784,8 +785,15 @@ function buildPreviewDocument(name, source) {
 function openPreview() {
   const name = fileNameInp.value.trim() || 'untitled.txt';
   if (!isPreviewable(name)) { sftpToast('Preview hanya untuk file HTML atau Markdown'); return; }
-  // Render isi editor SAAT INI (belum tentu sudah disimpan), sepenuhnya offline.
-  previewFrame.srcdoc = buildPreviewDocument(name, textarea.value);
+  const documentSource = buildPreviewDocument(name, textarea.value);
+  // Android memakai WebView terpisah TANPA AndroidBridge. Dengan begitu aplikasi HTML
+  // mendapat origin normal/localStorage/module tanpa bisa memanggil API native editor.
+  if (bridge && bridge.showPreviewDocument) {
+    bridge.showPreviewDocument(documentSource, name);
+    return;
+  }
+  previewFrame.setAttribute('sandbox', PREVIEW_SANDBOX_SAFE);
+  previewFrame.srcdoc = documentSource;
   document.getElementById('preview-name').textContent = name;
   previewOverlay.classList.add('open');
 }

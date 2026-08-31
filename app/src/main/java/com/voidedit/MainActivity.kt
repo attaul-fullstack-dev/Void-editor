@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private var isWebViewReady = false
     private var pendingLoadUri: Uri? = null
     private var pendingWriteContent: String? = null
+    private var editorLoadGeneration = 0L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val sftp = SftpManager()
@@ -97,6 +98,13 @@ class MainActivity : AppCompatActivity() {
         val name: String,
         val uri: Uri,
         val directory: Boolean
+    )
+
+    private data class PreparedDocument(
+        val name: String,
+        val text: String? = null,
+        val bytes: ByteArray? = null,
+        val mime: String? = null
     )
 
     private data class PendingLocalDownload(
@@ -177,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         activeRemoteConnection = null
         activeLocalPreviewRoot = null
         currentFileUri = uri
-        writeToUri(uri, content)
+        writeToUriAsync(uri, content)
     }
 
     private val pickFileLauncher = registerForActivityResult(
@@ -450,7 +458,9 @@ class MainActivity : AppCompatActivity() {
         }
         // Download berjalan di DownloadService dan tidak dibatalkan bersama Activity.
         scope.cancel()
+        val activePrivateKey = sftp.authenticatedConfig()?.privateKeyPath
         runCatching { sftp.disconnect() }
+        deleteManagedPrivateKeyIfUnused(activePrivateKey)
         // WebView memegang referensi ke Activity; tanpa destroy() proses renderer dan
         // Activity ikut tertahan (memory leak) setiap kali Activity dibuat ulang.
         runCatching {
@@ -471,22 +481,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadFileFromUri(uri: Uri) {
-        try {
-            val fileName = getFileName(uri)
-            // Gambar tidak punya mode edit teks: langsung tampilkan viewer (Fitur D.1).
-            if (isImage(fileName, contentResolver.getType(uri))) {
-                val bytes = readUriBytes(uri)
-                dispatchImage(bytes, mimeFor(fileName, contentResolver.getType(uri)), fileName)
-                return
+        val generation = ++editorLoadGeneration
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val name = getFileName(uri)
+                    val sourceMime = contentResolver.getType(uri)
+                    if (isImage(name, sourceMime)) {
+                        PreparedDocument(name, bytes = readUriBytes(uri), mime = mimeFor(name, sourceMime))
+                    } else {
+                        PreparedDocument(name, text = readUriText(uri))
+                    }
+                }
             }
-            val content = readUriText(uri)
-            currentFileUri = uri
-            activeRemotePath = null
-            activeRemoteConnection = null
-            activeLocalPreviewRoot = null
-            dispatchLoad(content, fileName, null, false)
-        } catch (e: Exception) {
-            toast("Gagal buka file: ${e.message}")
+            if (generation != editorLoadGeneration) return@launch
+            result.fold(
+                onSuccess = { prepared ->
+                    if (prepared.text != null) {
+                        currentFileUri = uri
+                        activeRemotePath = null
+                        activeRemoteConnection = null
+                        activeLocalPreviewRoot = null
+                        dispatchLoad(prepared.text, prepared.name, null, false)
+                    } else {
+                        dispatchImage(
+                            prepared.bytes ?: error("Data gambar tidak tersedia"),
+                            prepared.mime ?: "application/octet-stream",
+                            prepared.name
+                        )
+                    }
+                },
+                onFailure = { toast("Gagal buka file: ${it.message}") }
+            )
         }
     }
 
@@ -526,6 +552,19 @@ class MainActivity : AppCompatActivity() {
         if (permission.isReadPermission) flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
         if (permission.isWritePermission) flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         if (flags != 0) runCatching { contentResolver.releasePersistableUriPermission(uri, flags) }
+    }
+
+    /** Hanya hapus salinan key milik aplikasi yang tidak lagi direferensikan. */
+    private fun deleteManagedPrivateKeyIfUnused(path: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        if (!connectionStore.available) return false
+        if (connectionStore.list().any { it.privateKeyPath == path }) return false
+        if (sftp.authenticatedConfig()?.privateKeyPath == path) return false
+        return runCatching {
+            val root = File(filesDir, "keys").canonicalFile
+            val candidate = File(path).canonicalFile
+            if (candidate.parentFile != root || !candidate.isFile) false else candidate.delete()
+        }.getOrDefault(false)
     }
 
     private fun previewErrorResponse(status: Int, reason: String) = WebResourceResponse(
@@ -843,19 +882,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeToUri(uri: Uri, content: String) {
-        val result = runCatching { writeUriOrThrow(uri, content) }
-        result.fold(
-            onSuccess = {
-                toast("✓ Tersimpan")
-                emitResult(SAVE_REQUEST_ID, "save", true, JSONObject().put("target", "local"), null)
-            },
-            onFailure = {
-                val message = it.message ?: "File tidak dapat ditulis"
-                toast("Gagal simpan: $message")
-                emitResult(SAVE_REQUEST_ID, "save", false, null, message)
-            }
-        )
+    private fun writeToUriAsync(uri: Uri, content: String) {
+        isWriting = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { writeUriOrThrow(uri, content) } }
+            isWriting = false
+            result.fold(
+                onSuccess = {
+                    toast("✓ Tersimpan")
+                    emitResult(SAVE_REQUEST_ID, "save", true, JSONObject().put("target", "local"), null)
+                },
+                onFailure = {
+                    val message = it.message ?: "File tidak dapat ditulis"
+                    toast("Gagal simpan: $message")
+                    emitResult(SAVE_REQUEST_ID, "save", false, null, message)
+                }
+            )
+        }
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
@@ -1324,14 +1367,17 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sftpOpenFile(requestId: String, path: String) {
             scope.launch {
+                val generation = ++editorLoadGeneration
                 val result = withContext(Dispatchers.IO) { runCatching { sftp.read(path) } }
                 result.fold(
                     onSuccess = { content ->
-                        activeRemotePath = path
-                        activeRemoteConnection = connectedSftpConnection
-                        activeLocalPreviewRoot = null
-                        currentFileUri = null
-                        dispatchLoad(content, path.substringAfterLast('/'), path, true)
+                        if (generation == editorLoadGeneration) {
+                            activeRemotePath = path
+                            activeRemoteConnection = connectedSftpConnection
+                            activeLocalPreviewRoot = null
+                            currentFileUri = null
+                            dispatchLoad(content, path.substringAfterLast('/'), path, true)
+                        }
                         emitResult(requestId, "open", true, JSONObject().put("path", path), null)
                     },
                     onFailure = { emitResult(requestId, "open", false, null, it.message ?: "Gagal membuka file") }
@@ -1440,8 +1486,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sftpDisconnect(requestId: String) {
             runSftp(requestId, "disconnect") {
+                val privateKey = sftp.authenticatedConfig()?.privateKeyPath
                 sftp.disconnect()
                 connectedSftpConnection = null
+                deleteManagedPrivateKeyIfUnused(privateKey)
                 JSONObject().put("status", "disconnected")
             }
         }
@@ -1510,9 +1558,14 @@ class MainActivity : AppCompatActivity() {
                             runCatching {
                                 val name = getFileName(uri)
                                 val dest = File(filesDir, "keys").apply { mkdirs() }.let { File(it, "id_${System.currentTimeMillis()}") }
-                                contentResolver.openInputStream(uri)?.use { input ->
-                                    dest.outputStream().use { output -> input.copyTo(output) }
-                                } ?: error("Tidak dapat membaca key")
+                                try {
+                                    contentResolver.openInputStream(uri)?.use { input ->
+                                        dest.outputStream().use { output -> input.copyTo(output) }
+                                    } ?: error("Tidak dapat membaca key")
+                                } catch (error: Exception) {
+                                    dest.delete()
+                                    throw error
+                                }
                                 JSONObject().put("path", dest.absolutePath).put("name", name)
                             }
                         }
@@ -1547,14 +1600,18 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun saveConnection(configJson: String, label: String): String = wrapSync {
             val json = JSONObject(configJson)
+            val previousKeys = connectionStore.list().mapNotNull { it.privateKeyPath }.toSet()
             val id = connectionStore.save(label, configFromJson(json), authTypeOf(json))
+            previousKeys.forEach { deleteManagedPrivateKeyIfUnused(it) }
             JSONObject().put("id", id)
         }
 
         @JavascriptInterface
         fun updateConnection(id: String, configJson: String, label: String): String = wrapSync {
             val json = JSONObject(configJson)
+            val previousKey = connectionStore.get(id)?.privateKeyPath
             connectionStore.update(id, label, configFromJson(json), authTypeOf(json))
+            deleteManagedPrivateKeyIfUnused(previousKey)
             JSONObject().put("id", id)
         }
 
@@ -1568,7 +1625,13 @@ class MainActivity : AppCompatActivity() {
             val saved = connectionStore.get(id) ?: error("Koneksi tersimpan tidak ditemukan")
             connectionStore.delete(id)
             prefs.edit().remove(hostKeyPref(saved.host, saved.port)).apply()
+            deleteManagedPrivateKeyIfUnused(saved.privateKeyPath)
             JSONObject().put("id", id).put("fingerprintCleared", true)
+        }
+
+        @JavascriptInterface
+        fun releaseUnusedPrivateKey(path: String): String = wrapSync {
+            JSONObject().put("released", deleteManagedPrivateKeyIfUnused(path))
         }
 
         /** Connect memakai kredensial tersimpan — password tidak pernah dikirim ke WebView. */
@@ -1598,10 +1661,12 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun pickLocalDocument() {
             runOnUiThread {
-                openFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                })
+                runCatching {
+                    openFileLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    })
+                }.onFailure { toast(it.message ?: "Pemilih dokumen tidak tersedia") }
             }
         }
 
@@ -1610,11 +1675,14 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sftpOpenImage(requestId: String, path: String) {
             scope.launch {
+                val generation = ++editorLoadGeneration
                 val result = withContext(Dispatchers.IO) { runCatching { sftp.readBytes(path, 4L * 1024 * 1024) } }
                 result.fold(
                     onSuccess = { bytes ->
                         val name = path.substringAfterLast('/')
-                        dispatchImage(bytes, mimeFor(name, null), name)
+                        if (generation == editorLoadGeneration) {
+                            dispatchImage(bytes, mimeFor(name, null), name)
+                        }
                         emitResult(requestId, "openImage", true, JSONObject().put("path", path), null)
                     },
                     onFailure = { emitResult(requestId, "openImage", false, null, it.message ?: "Gagal membuka gambar") }
@@ -1830,6 +1898,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun localOpen(requestId: String, uriString: String, parentUriString: String) {
             scope.launch {
+                val generation = ++editorLoadGeneration
                 val uri = Uri.parse(uriString)
                 val prepared = withContext(Dispatchers.IO) {
                     runCatching {
@@ -1841,14 +1910,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 prepared.fold(
                     onSuccess = { (name, kind, bytes) ->
-                        if (kind == "text") {
-                            currentFileUri = uri
-                            activeRemotePath = null
-                            activeRemoteConnection = null
-                            activeLocalPreviewRoot = parentUriString.takeIf { it.isNotBlank() }?.let(Uri::parse)
-                            dispatchLoad(bytes.toString(Charsets.UTF_8), name, null, activeLocalPreviewRoot != null)
-                        } else {
-                            dispatchImage(bytes, kind, name)
+                        if (generation == editorLoadGeneration) {
+                            if (kind == "text") {
+                                currentFileUri = uri
+                                activeRemotePath = null
+                                activeRemoteConnection = null
+                                activeLocalPreviewRoot = parentUriString.takeIf { it.isNotBlank() }?.let(Uri::parse)
+                                dispatchLoad(bytes.toString(Charsets.UTF_8), name, null, activeLocalPreviewRoot != null)
+                            } else {
+                                dispatchImage(bytes, kind, name)
+                            }
                         }
                         emitResult(requestId, "localOpen", true, JSONObject().put("name", name), null)
                     },

@@ -497,3 +497,33 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 - Audit handler HTML dan bridge JS–Kotlin lolos.
 - `git diff --check` lolos.
 - Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.
+
+## 2026-08-31 — Audit penuh: main-thread I/O, stale open, dan private key yatim
+
+### Gejala
+
+- Membuka dokumen dari picker/intent atau menyelesaikan Save As dapat membuat UI berhenti merespons pada provider SAF yang lambat.
+- Dua permintaan buka file yang berdekatan dapat selesai terbalik, sehingga respons lama mengganti file yang dipilih terakhir.
+- Private key yang dipilih untuk SFTP dapat tertinggal di penyimpanan internal setelah diganti, form dibatalkan, koneksi dihapus, atau proses copy gagal.
+- Kegagalan membuka document picker dari Explorer tidak memberikan umpan balik.
+
+### Penyebab
+
+- `loadFileFromUri()` membaca stream dan `writeToUri()` menulis stream langsung dari callback main thread.
+- Alur buka dokumen lokal, SFTP, gambar, dan intent tidak berbagi generation token untuk menolak hasil asynchronous yang stale.
+- Setiap pemilihan key membuat salinan permanen baru tanpa lifecycle cleanup yang mengerti referensi koneksi aktif/tersimpan.
+- `pickLocalDocument()` memanggil launcher tanpa menangani exception.
+
+### Solusi
+
+- Pindahkan read dokumen serta write Save As ke `Dispatchers.IO`; pertahankan pelaporan hasil dan guard Save selama write berlangsung.
+- Gunakan generation token bersama pada seluruh alur open agar hanya pilihan terbaru yang boleh mengubah editor/viewer.
+- Hapus hanya private key yang berada tepat di direktori key milik aplikasi dan tidak direferensikan koneksi aktif maupun tersimpan; lakukan cleanup saat replace, batal, update, delete, disconnect, Activity ditutup, dan copy gagal.
+- Tangani kegagalan document picker dengan pesan native.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- Audit handler HTML, DOM id, dan bridge JS–Kotlin lolos.
+- `git diff --check` lolos.
+- Build/unit test Android memerlukan Java 17 yang tidak tersedia di environment ini.

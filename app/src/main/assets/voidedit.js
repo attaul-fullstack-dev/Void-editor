@@ -1249,6 +1249,9 @@ let localStack = [];                // riwayat navigasi folder lokal
 let localBookmarkLabel = '';
 
 function showExplorerView(view) {
+  if (explorerView === 'connect' && view !== 'connect') {
+    releaseUnusedPrivateKeyPath(document.getElementById('sftp-key-path').value);
+  }
   explorerView = view;
   if (view !== "sftp") clearSftpSelection(false);
   if (view !== "local") clearLocalSelection(false);
@@ -1584,6 +1587,13 @@ function releaseUnusedTreePermission(uri) {
   catch (_) {}
 }
 
+function releaseUnusedPrivateKeyPath(path) {
+  if (!path || !bridge.releaseUnusedPrivateKey) return false;
+  try {
+    return !!callSync(() => bridge.releaseUnusedPrivateKey(path), 'Bersihkan private key').released;
+  } catch (_) { return false; }
+}
+
 document.getElementById('addpath-dialog').addEventListener('close', () => {
   const unused = pendingTreeUri;
   pendingTreeUri = null;
@@ -1889,6 +1899,11 @@ function importLocalZip() {
 
 function toggleSftpAuth() {
   const mode = document.getElementById('sftp-auth').value;
+  const keyPath = document.getElementById('sftp-key-path');
+  if (mode !== 'key' && releaseUnusedPrivateKeyPath(keyPath.value)) {
+    keyPath.value = '';
+    document.getElementById('sftp-key-button').textContent = 'Pilih private key';
+  }
   document.getElementById('key-fields').classList.toggle('visible', mode === 'key');
   document.getElementById('password-field').style.display = mode === 'key' ? 'none' : '';
 }
@@ -2426,7 +2441,9 @@ function copySelectedUri() {
 function pickSftpKey() {
   callBridge(null, (id) => bridge.sftpPickPrivateKey(id))
     .then((data) => {
-      document.getElementById('sftp-key-path').value = data.path;
+      const input = document.getElementById('sftp-key-path');
+      if (input.value && input.value !== data.path) releaseUnusedPrivateKeyPath(input.value);
+      input.value = data.path;
       document.getElementById('sftp-key-button').textContent = data.name || 'Key dipilih';
     })
     .catch((err) => sftpToast(err.message));

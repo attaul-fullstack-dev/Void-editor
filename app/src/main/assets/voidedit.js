@@ -1540,6 +1540,7 @@ function openAddPathDialog() {
 async function pickFolderTree() {
   try {
     const data = await callBridge(null, (id) => bridge.pickFolderTree(id));
+    if (pendingTreeUri && pendingTreeUri !== data.treeUri) releaseUnusedTreePermission(pendingTreeUri);
     pendingTreeUri = data.treeUri;
     document.getElementById('addpath-uri').value = decodeURIComponent(data.treeUri);
     const nameInput = document.getElementById('addpath-name');
@@ -1553,12 +1554,24 @@ function submitAddPath(event) {
   const label = document.getElementById('addpath-name').value.trim();
   try {
     callSync(() => bridge.addLocalBookmark(pendingTreeUri, label), 'Tambah folder');
-    document.getElementById('addpath-dialog').close();
     pendingTreeUri = null;
+    document.getElementById('addpath-dialog').close();
     sftpToast('Folder ditambahkan');
     renderBookmarks();
   } catch (err) { sftpToast(err.message); }
 }
+
+function releaseUnusedTreePermission(uri) {
+  if (!uri || !bridge.releaseUnusedLocalTreePermission) return;
+  try { callSync(() => bridge.releaseUnusedLocalTreePermission(uri), 'Lepas izin folder'); }
+  catch (_) {}
+}
+
+document.getElementById('addpath-dialog').addEventListener('close', () => {
+  const unused = pendingTreeUri;
+  pendingTreeUri = null;
+  releaseUnusedTreePermission(unused);
+});
 
 function openBookmarkMenu(item) {
   selectedBookmark = item;

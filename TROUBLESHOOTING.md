@@ -376,6 +376,33 @@ Transfer berjalan di coroutine milik Activity, bukan komponen Android yang diizi
 - `git diff --check` lolos.
 - Unit test Android memerlukan Java 17; environment Codex ini tidak menyediakan `java`/`JAVA_HOME`.
 
+## 2026-08-31 — Izin SAF hilang setelah restart dan bocor setelah bookmark dihapus
+
+### Gejala
+
+- Folder dari provider read-only dapat dibuka saat pertama dipilih, tetapi gagal setelah aplikasi di-restart.
+- Terus menambah lalu menghapus bookmark folder tetap menghabiskan kuota persisted URI permission Android.
+
+### Penyebab
+
+- Semua Activity Result memanggil `takePersistableUriPermission()` dengan READ dan WRITE sekaligus, bukan hanya flag yang benar-benar diberikan provider. Jika WRITE tidak diberikan, persistensi READ ikut gagal.
+- Menghapus bookmark hanya menghapus metadata dari SharedPreferences tanpa melepaskan persisted URI permission terkait.
+- Memilih folder lalu membatalkan dialog `Tambah jalur`, atau mengganti pilihan sebelum menyimpan, juga meninggalkan izin tanpa pemilik.
+
+### Solusi
+
+- Ambil flag READ/WRITE dari result Intent dan persist hanya mode yang diberikan provider pada seluruh picker file, folder, Save As, dan download.
+- Tolak penambahan bookmark dengan pesan eksplisit bila provider tidak memberikan izin folder permanen.
+- Saat bookmark terakhir untuk suatu tree URI dihapus, lepaskan mode izin yang benar-benar tercatat pada `persistedUriPermissions`.
+- Lepaskan izin pilihan folder yang tidak jadi disimpan ketika dialog ditutup atau pilihannya diganti, tanpa melepas URI yang masih dipakai bookmark lain.
+- URI bookmark yang tidak ditemukan sekarang menghasilkan error eksplisit, bukan sukses palsu.
+
+### Verifikasi
+
+- `node --check app/src/main/assets/voidedit.js` lolos.
+- `git diff --check` lolos.
+- Build Android belum dapat dijalankan karena environment tidak menyediakan Java 17.
+
 ## 2026-08-31 — Race condition Save, picker, download, dan explorer lokal
 
 ### Gejala

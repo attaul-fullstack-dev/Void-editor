@@ -149,13 +149,9 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
-                } catch (_: Exception) {}
+            val data = result.data
+            data?.data?.let { uri ->
+                persistGrantedUriPermission(uri, data)
                 loadFileFromUri(uri)
             }
         }
@@ -166,18 +162,14 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         val content = pendingWriteContent
         pendingWriteContent = null
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        val data = result.data
+        val uri = if (result.resultCode == Activity.RESULT_OK) data?.data else null
         if (uri == null || content == null) {
             // Dibatalkan user: tetap laporkan supaya editor tidak menandai file sudah bersih.
             emitResult(SAVE_REQUEST_ID, "save", false, null, "Penyimpanan dibatalkan")
             return@registerForActivityResult
         }
-        try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (_: Exception) {}
+        persistGrantedUriPermission(uri, data)
         activeRemotePath = null
         activeRemoteConnection = null
         currentFileUri = uri
@@ -191,7 +183,8 @@ class MainActivity : AppCompatActivity() {
         val req = pickRequest
         pickCallback = null
         pickRequest = null
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        val data = result.data
+        val uri = if (result.resultCode == Activity.RESULT_OK) data?.data else null
         if (uri != null && cb != null) {
             cb.invoke(uri)
         } else if (req != null) {
@@ -245,17 +238,13 @@ class MainActivity : AppCompatActivity() {
         val pending = pendingSftpDownload
         pendingSftpDownload = null
         if (pending == null) return@registerForActivityResult
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        val data = result.data
+        val uri = if (result.resultCode == Activity.RESULT_OK) data?.data else null
         if (uri == null) {
             emitResult(pending.requestId, "download", false, null, "Download dibatalkan")
             return@registerForActivityResult
         }
-        try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (_: Exception) {}
+        persistGrantedUriPermission(uri, data)
         runDownloadWithNotificationPermission start@{
             val config = sftp.authenticatedConfig()
             if (config == null) {
@@ -286,17 +275,13 @@ class MainActivity : AppCompatActivity() {
         val pending = pendingLocalDownload
         pendingLocalDownload = null
         if (pending == null) return@registerForActivityResult
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        val data = result.data
+        val uri = if (result.resultCode == Activity.RESULT_OK) data?.data else null
         if (uri == null) {
             emitResult(pending.requestId, "localDownload", false, null, "Download dibatalkan")
             return@registerForActivityResult
         }
-        try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (_: Exception) {}
+        persistGrantedUriPermission(uri, data)
         runDownloadWithNotificationPermission {
             val itemsJson = JSONArray().apply {
                 pending.items.forEach { item ->
@@ -338,17 +323,16 @@ class MainActivity : AppCompatActivity() {
         val requestId = pendingTreeRequestId
         pendingTreeRequestId = null
         if (requestId == null) return@registerForActivityResult
-        val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
+        val resultData = result.data
+        val uri = if (result.resultCode == Activity.RESULT_OK) resultData?.data else null
         if (uri == null) {
             emitResult(requestId, "pickTree", false, null, "Pemilihan folder dibatalkan")
             return@registerForActivityResult
         }
-        try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (_: Exception) {}
+        if (!persistGrantedUriPermission(uri, resultData)) {
+            emitResult(requestId, "pickTree", false, null, "Provider folder tidak memberikan izin permanen")
+            return@registerForActivityResult
+        }
         val data = JSONObject()
             .put("treeUri", uri.toString())
             .put("name", treeDisplayName(uri))
@@ -487,6 +471,23 @@ class MainActivity : AppCompatActivity() {
             }
             return output.toByteArray()
         }
+    }
+
+    /** Persist hanya mode yang benar-benar diberikan provider dalam result Intent. */
+    private fun persistGrantedUriPermission(uri: Uri, resultData: Intent?): Boolean {
+        val granted = resultData?.flags?.and(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        ) ?: 0
+        if (granted == 0) return false
+        return runCatching { contentResolver.takePersistableUriPermission(uri, granted) }.isSuccess
+    }
+
+    private fun releasePersistedUriPermission(uri: Uri) {
+        val permission = contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri } ?: return
+        var flags = 0
+        if (permission.isReadPermission) flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
+        if (permission.isWritePermission) flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        if (flags != 0) runCatching { contentResolver.releasePersistableUriPermission(uri, flags) }
     }
 
     // Kirim gambar ke viewer khusus di WebView (bukan textarea).
@@ -1562,13 +1563,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun releaseUnusedLocalTreePermission(treeUri: String): String = wrapSync {
+            if (bookmarkStore.list().none { it.treeUri == treeUri }) {
+                releasePersistedUriPermission(Uri.parse(treeUri))
+            }
+            JSONObject().put("released", true)
+        }
+
+        @JavascriptInterface
         fun renameLocalBookmark(id: String, label: String): String = wrapSync {
             bookmarkStore.rename(id, label); JSONObject().put("id", id)
         }
 
         @JavascriptInterface
         fun deleteLocalBookmark(id: String): String = wrapSync {
-            bookmarkStore.delete(id); JSONObject().put("id", id)
+            val bookmark = bookmarkStore.get(id) ?: error("Folder tersimpan tidak ditemukan")
+            bookmarkStore.delete(id)
+            if (bookmarkStore.list().none { it.treeUri == bookmark.treeUri }) {
+                releasePersistedUriPermission(Uri.parse(bookmark.treeUri))
+            }
+            JSONObject().put("id", id).put("permissionReleased", true)
         }
 
         /**
